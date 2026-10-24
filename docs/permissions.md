@@ -34,7 +34,7 @@ Every action goes through these steps in order. The first failure stops it.
 | # | Check | Question | Source |
 |---|---|---|---|
 | 1 | Signed in | Is there a valid session? | Better Auth session |
-| 2 | Account status | Is `users.status` = active? A user **without a username** may only reach `/welcome` and sign-out. A pending user may reach `/welcome`, `/pending` and sign-out. Rejected and deactivated users may only sign out | `users` |
+| 2 | Account status | Is `users.status` = active? A user **without a username** may only reach `/welcome` and sign-out. A pending user may reach `/welcome`, `/pending` and sign-out. Rejected and deactivated users see only `/pending` (their status message and a sign-out button) | `users` |
 | 3 | Permission | Does the user's role hold the key? | `role_permissions` |
 | 4 | Relationship | Is the user connected to this record in the needed capacity? Admin passes this step **for reading** the records in section 5, and for the two transfer actions | `class_faculty`, `class_members`, `tasks`, `team_members` |
 | 5 | State | Does the record's state allow it (assignment open, code not expired, task not deleted, class not archived)? | The record |
@@ -167,7 +167,7 @@ Each page requires one key; the menu hides pages whose key is missing and the se
 
 1. **Data access functions (the real enforcement).** Every read and write takes the acting user and scopes the query ("tasks where assignee = this user"), never "task by id". A record the user cannot access is not found. The Admin read access is implemented once here.
 2. **Policy functions**, one small function per rule, for example `canGradeSubmission(user, submission)`, in each domain's `policy.ts`. Plain functions, testable without a browser. Shared helpers (`authorize`, class capacity, Admin access) live in `src/server/policies/`.
-3. **`proxy.ts` (coarse only).** Redirects signed-out users, users without a username and pending users. Never the only check. Its matcher excludes `/api/auth`, `/api/uploads`, `/api/files` and static files.
+3. **`proxy.ts` (coarse only).** Redirects visitors with no session cookie to `/sign-in`. It cannot read the database, so it cannot know a username or an account status; that routing is `gate()` in `src/server/auth/access-gate.ts`, which every page calls (decided in Slice 1). Never the only check. Its matcher excludes `/api/auth`, `/api/uploads`, `/api/files` and static files.
 4. **The UI.** Hides buttons and menu items based on the permission set. Convenience only.
 
 Checks run in every page's data function and every action; a check only in a layout is not enough (layouts do not run for server actions, and are not re-run on every client navigation).

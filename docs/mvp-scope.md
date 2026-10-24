@@ -153,7 +153,7 @@ A slice is **done** only when: schema and logic exist, its tests pass (including
 | 8 | Class tracker, faculty dashboard, student dashboard, `seed:demo` extended with a demo class and submissions | Numbers match fixtures | 12 to 18 |
 | | **Checkpoint B** (first university demo): the full faculty-to-student loop as well | | ≈ 200 to 300 |
 | 9 | Month view, consistency, weekly summary with AI suggestions, estimate hint | No model-written number ever shown | 15 to 25 |
-| 10 | Permission grid editing, Admin read-only views and transfers, reset links, audit viewer | A grid change works on the next request; ineligible grants refused | 12 to 20 |
+| 10 | Admin completion: permission grid editing, Admin read-only views and transfers, reset links, audit viewer, **deactivate and reactivate users (deleting their sessions in the same transaction)**, **role change (refused while the blockers in `permissions.md` §6 rule 8 exist)**, **reset a rejected account to pending** | A grid change works on the next request; ineligible grants refused; a deactivated user's open session is refused at once; a role change with a blocker is refused with the blockers listed | 18 to 28 |
 | 11 | Teams: invitations, team tasks, former members, AI breakdown on team tasks | Only active members see team tasks; only the assignee changes status | 30 to 45 |
 | 12 | Hardening: security review, friends test through the tunnel, demo setup with the local fallback, documentation | Full demo run from the laptop with the network off | 25 to 40 |
 

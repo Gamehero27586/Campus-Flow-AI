@@ -5,11 +5,15 @@
 /* Theme tokens from docs/color-palette.md §4. Light mode only in the MVP.
    Components use these tokens (bg-primary, text-muted-foreground ...), never raw hex values. */
 
+/* Light mode only: `dark:` styles in shadcn components apply only inside a .dark element, which the app never sets.
+   Without this line Tailwind would follow the operating system's dark-mode setting. */
+@custom-variant dark (&:is(.dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

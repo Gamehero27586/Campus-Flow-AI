@@ -11,10 +11,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "tests/unit/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
     env: {
       // A harmless value so src/env.ts validates. Tests never connect to this.
       DATABASE_URL: "postgres://test:test@127.0.0.1:5432/test",
+      BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-0000",
+      BETTER_AUTH_URL: "http://localhost:3000",
     },
   },
 });

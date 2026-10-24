@@ -1,0 +1,7 @@
+# One line-ending style in the repository (LF), so Git diffs show only real changes.
+# Windows editors may still show CRLF locally; Git converts on commit.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.woff2 binary

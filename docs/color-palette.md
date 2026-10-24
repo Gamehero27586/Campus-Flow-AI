@@ -70,7 +70,7 @@ Danger is a true red, so "secondary action" (coral) and "danger" never look alik
 
 Components use these tokens (`bg-primary`, `text-muted-foreground` and so on), never raw hex values. [Verify] the exact variable names and colour format (shadcn's current Tailwind v4 setup may expect OKLCH values) when shadcn/ui is installed in Slice 0; keep the colours above.
 
-**Open (owner's choice, decisions.md §15):** whether secondary buttons stay coral fill with dark text (as above), or become teal outline with coral kept as the 10% accent for one signature action such as "Break this down".
+**Open (owner's choice, decisions.md §18):** whether secondary buttons stay coral fill with dark text (as above), or become teal outline with coral kept as the 10% accent for one signature action such as "Break this down".
 
 ## 5. Task states and charts
 

@@ -131,7 +131,7 @@ Slices and hours are in `mvp-scope.md` §11. Two checkpoints:
 | P1 (simplify teams), P4 (simplify join and leave), P8 (trim metrics) | **Rejected by the owner.** Teams, join requests, leave requests and all metrics stay as designed |
 | P9 (Google later), P10 (co-teachers later) | **Rejected by the owner.** Both stay in the early slices |
 | D1 to D3, D5, D6 | Applied in `color-palette.md` v2 |
-| D4 (coral versus teal hierarchy) | Open, owner's design choice (section 15) |
+| D4 (coral versus teal hierarchy) | Open, owner's design choice (section 18) |
 | New slice order and two checkpoints | Applied |
 
 Choices Opus made where the owner had not answered; the owner may change any of them: `input: false` instead of a separate profile table; refusing role changes; immutable usernames; the 5, 10 and 3 thresholds; faculty being **eligible** (off by default) for personal tasks, the personal tracker and AI.
@@ -145,11 +145,55 @@ Choices Opus made where the owner had not answered; the owner may change any of 
 - **Test database: PGlite**, checked on 24 Oct 2026: `AT TIME ZONE`, `date_trunc('week' ...)` in a zone, daylight-saving edges, `gen_random_uuid()`, CHECK constraints and partial unique indexes all behave like Postgres. It is added as a dev dependency in the first slice that has database tests (Slice 2 or 3). Triggers (append-only tables) must be re-checked on PGlite then; if one fails, use a local Postgres test database.
 - **Migrations:** `drizzle/0000_baseline.sql` is an intentionally empty baseline, applied to Neon. `drizzle.config.ts` uses `DATABASE_URL_UNPOOLED` when set, otherwise `DATABASE_URL`. `pg` warns that `sslmode=require` is treated as `verify-full`; this is the safe behaviour and needs no change.
 - **`npm audit`:** 4 moderate findings, all one old `esbuild` copy inside `drizzle-kit` (dev-server request issue, dev tool only, never shipped). `npm audit fix --force` would downgrade `drizzle-kit` to 0.18, so it is not applied. CI fails only on high or critical. Re-check each slice; drop this note when drizzle-kit updates.
-- **Git:** the owner runs all git commands that change anything. Claude never commits, branches, tags or pushes unless told to.
+- **Git:** from the end of Slice 0 the owner does all committing, on the branch `dev-Arjun`, and merges to `main` after review. Claude never commits, branches, tags or pushes (Claude did the Slice 0 commit, merge and tag once, at the owner's request).
 - **Scripts** `seed:base`, `seed:demo`, `admin:promote`, `eval:ai`, `files:cleanup` are added with the slice that creates them, not before.
 - **Not yet done from the Slice 0 checklist:** Dependabot alerts on in GitHub (a repository setting the owner switches on), a local PostgreSQL database (owner is installing it later), `npx playwright install` (needed when the first e2e flow is written).
 
-## 15. Still open
+## 17. Slice 1 notes (built and reviewed 24 Oct 2026)
+
+**Better Auth 1.7.12, checked against its current docs and source:**
+- Confirmed names: `user.additionalFields` with `input: false`, `session.cookieCache.enabled: false`, `account.accountLinking.disableImplicitLinking`, `advanced.database.generateId: "uuid"`, username plugin `immutableUsername`, `minUsernameLength`, `maxUsernameLength`, top-level `disabledPaths`. The schema CLI is `npx auth@latest generate` (not `@better-auth/cli`); the tables here were written by hand in Drizzle instead and are proven by tests that run the real migrations.
+- **Better Auth drops or refuses app-owned fields at sign-up and `update-user`.** It does not guard `displayUsername`: any user could set it to "Admin". Our `update.before` hook therefore requires the display username to equal the username apart from letter case. `immutableUsername` only fires when a request contains `username`.
+- **The welcome action must send `username` and `displayUsername` together** (the typed form is kept for display; updates with only `username` leave `display_username` empty).
+- Disabled endpoints: `/is-username-available`, `/sign-in/username`, `/request-password-reset`, `/forget-password`, `/send-verification-email`, `/verify-email`, `/link-social`, `/unlink-account`, `/list-accounts` (no MVP feature uses them; each is tested as 404). There is no Better Auth call that returns a reset link without sending email, so Admin reset links (Slice 10) need their own design around the `sendResetPassword` callback.
+- Rate limits (sign-in and sign-up 5 per minute) run only in production mode.
+
+**Structure:** `createAuth(db, settings)` in `src/server/auth/create-auth.ts` builds the auth object so tests can pass an in-memory PGlite database; `better-auth.ts` builds the real one. Files in `src/server/db/schema/` import each other with relative paths and do not import `server-only`, because `drizzle-kit` loads them outside Next.js.
+
+**Choices made while building 1b to 1e (the owner may change any of them):**
+- **`proxy.ts` only redirects signed-out visitors** (by session cookie). The docs also listed "no username" and "pending" redirects there, but the proxy cannot read the database, and a cookie alone proves nothing. The username and approval routing is `gate()` in `src/server/auth/access-gate.ts`, called by every page, and tested as a table. This is stricter, not looser.
+- **Rejected and deactivated accounts see `/pending`** (the page with the message and the sign-out button). A sign-out button needs a page to sit on, so `permissions.md` §2 now says they see only `/pending` (status message and sign-out).
+- **Form schemas live in `src/lib/schemas/`**, not in `src/server/<domain>/schemas.ts`, because the sign-in, sign-up and welcome forms run in the browser and `src/server` cannot be imported there. Server code imports the same schemas from `src/lib`.
+- **Approval offers Student and Faculty only.** Making someone Admin is `admin.users.assign_role` (Slice 10). An account that has not chosen a username cannot be approved. An unverified email needs the Admin to tick a confirmation, and the server enforces it as well as the form.
+- **Anyone can sign up, and every account starts pending** (Better Auth's `input: false`, plus the create hook). Google sign-in appears only when both `GOOGLE_*` variables are set.
+- **`seed:base` gives defaults only to a key that has no grants**, so Admin grid edits survive a re-run. Consequence: if an Admin removes every grant from a key, re-running the seed restores the defaults.
+- **Scripts run with `tsx --conditions=react-server`** so `server-only` and React's `cache` behave as they do in Next.js. The package is CommonJS, so scripts use a `main()` function instead of top-level `await`.
+- **`@hookform/resolvers` is pinned to 5.x** (6.x had an unresolvable optional peer dependency with Zod 4).
+- **Sign-up does not sign anyone in** (`emailAndPassword.autoSignIn: false`, owner's request). The sign-up page shows a toast and sends the person to `/sign-in`, they sign in with the new email and password, and the home page then sends them to `/welcome` for the username. Google sign-in has no separate sign-up step: a new Google account is signed in and goes straight to `/welcome`.
+- **Toasts (sonner, wrapped in `src/components/ui/sonner.tsx`, always light, top centre)** report the result of sign-in ("Signed in."), sign-up and Google errors. The wording lives in `src/lib/auth-messages.ts` and is unit-tested. Field mistakes (bad email, short password) stay inline under the field. Other forms (welcome, settings, Admin) still show their messages inline.
+- **Sign-up with an email that already has an account looks successful.** With `autoSignIn: false`, Better Auth deliberately returns a generic success and creates nothing, so nobody can discover which emails are registered. The sign-up toast is worded to be true in both cases ("If this email already had an account, use its existing password").
+- **Font: Poppins** (owner's request), loaded with `next/font/google` at weights 400 to 700. The shadcn template's `--font-sans: var(--font-sans)` pointed at itself, so no font was ever applied; it now points at `--font-poppins`.
+- **Light mode is enforced:** `@custom-variant dark (&:is(.dark *))` is kept in `globals.css`. Without it, Tailwind's `dark:` styles follow the operating system's dark-mode setting and grey out the inputs and buttons. Do not remove it while the app is light-only.
+- **First Admin:** the owner's account was promoted with `npm run admin:promote` after a manual `role_id` edit left the status `pending`. Both the role and an `active` status are needed; the script sets both and writes the audit row.
+- **Not tested here:** the Google sign-in round trip (needs the owner's Google account) and the friends-test tunnel. Everything else ran end to end in a browser on 24 Oct 2026: sign-up, welcome, pending, `admin:promote`, approval with the unverified-email confirmation, student sign-in, and "not found" on the Admin page for a student. The two test accounts were deleted afterwards.
+
+**Fixes from the Slice 1 Opus review** (`docs/reviews/slice-1-opus-review.md`, all applied 24 Oct 2026):
+- **N1 (revised):** `/link-social` is enabled again for Connect Google (see below); `/unlink-account` and `/list-accounts` stay disabled.
+- **R1** `name` is trimmed and limited to 100 characters in Better Auth's create and update hooks, not only in the form (`NAME_MAX_LENGTH`). A long Google profile name is shortened, not refused, so it cannot block a sign-in.
+- **R2** Users cannot set `image`: `update-user` refuses it, and the create hook keeps an image only for Google sign-ins. Better Auth's `update-user` handler passes `name` and `image` as keys with value `undefined` when they were not sent, so the hooks test the value, not the key.
+- **R3** The secret-generation command in `.env.example` is now Node's `crypto.randomBytes`. (The secret already in `.env.local` was made with .NET's cryptographic generator, so it did not need replacing.)
+- **R4** Approving needs both `admin.users.manage` and `admin.users.assign_role`. `authorize()` takes one key or a list that must all be held. Rejecting needs only the first.
+- **R5** Reserved usernames (`RESERVED_USERNAMES` in `src/config/limits.ts`: admin, support, system, faculty, campusflow and more) are refused by the form and by the username plugin's `usernameValidator`. Dots and underscores are ignored when comparing, so `ad.min` is refused too. The message is the same generic one.
+- **R6** `.gitattributes` sets LF line endings so Git diffs show only real changes. The owner runs `git add --renormalize .` once.
+- **N1** `/link-social`, `/unlink-account` and `/list-accounts` are disabled. **N2** The sign-up attack tests assert in both outcomes. **N4** README says to open the app at exactly `BETTER_AUTH_URL`. **N7** Approve and reject select only the columns they use.
+- **Planning gap closed (review D4):** deactivate and reactivate, role change and reset-a-rejected-account were designed but in no slice. They are now in the Slice 10 row of `mvp-scope.md` §11, whose estimate rises from 12 to 20 hours to 18 to 28; the total build estimate rises by about 6 to 8 hours (re-estimate after Slice 3).
+- **Connect Google (added after the review, owner's request):** a Google sign-in for an email that already has a password account is still refused (`account_not_linked`), because the email was never verified and a silent merge would let whoever registered the email first keep a password into the account. Instead the person signs in with their password and presses **Connect Google** in Settings (`/link-social` is therefore enabled; `/unlink-account` and `/list-accounts` stay off). Better Auth's explicit-link path skips the implicit-linking block when a signed-in user is linking (checked in `oauth2/link-account.mjs`), and requires the Google email to match the account's email. Settings shows "Sign-in methods": password set or not, Google connected or not. The link round trip itself is **not tested here** (needs the owner's Google account); `hasGoogleLogin`, the messages and the "needs a session" check are tested.
+- **Google always shows its account picker** (`prompt: "select_account"` on the Google provider), for sign-in and for Connect Google. Found when the owner's first Connect Google linked at once because the browser was already signed in to that Google account: safe (the email must match), but risky on a shared computer. A test checks the sign-in URL carries `prompt=select_account`.
+- **Deferred (review N3, N5, N6):** the client-IP header behind the tunnel (Slice 12), the first Playwright flow (Slice 2) and the Admin list's 200-row notice (later).
+
+**Slice order overlap (approved by the owner):** Slice 1 also builds the permission keys, `seed:base` and steps 1 to 3 of `authorize()` (signed in, account active, permission key). Slice 2 adds steps 4 and 5, the audit triggers, the read-only grid and the table-driven harness.
+
+## 18. Still open
 
 1. **D4:** should secondary buttons stay coral (with dark text), or become teal outline with coral kept as the accent? Decide before Slice 3, when the first real screens are built.
 2. The wireframes do not yet show the requested-role field, the "When did you start?" prompt, the email-verified badge or the reset-link action. The documents decide; update the canvas when convenient.

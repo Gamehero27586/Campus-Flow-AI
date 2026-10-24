@@ -54,7 +54,7 @@ campus-flow-ai/
     e2e/                    Playwright flows
   .github/workflows/ci.yml  Typecheck, lint, test
   src/
-    proxy.ts                Coarse redirects only (signed out, no username, pending). Never the only check
+    proxy.ts                Coarse redirect only: no session cookie goes to /sign-in. Username and status routing is gate() in server/auth/access-gate.ts. Never the only check
     env.ts                  Validated environment variables (imports "server-only")
     config/                 Limits and thresholds in one place (file size and count, code expiry options, tracker minimums, rate limits, AI timeouts)
     app/                    Routing and pages only
@@ -107,7 +107,7 @@ campus-flow-ai/
 | `policy.ts` | Plain functions answering "may this user do this to this record?", for example `canGradeSubmission(user, submission)` | No database access except what is passed in; easy to test |
 | `queries.ts` | Reads. Every function takes the acting user and scopes the query, and returns plain objects with only the needed columns | Never "get by id" without a scope; never return a raw row to a Client Component |
 | `commands.ts` | Writes. Each runs in a transaction, writes the audit entry when needed, and returns a result | The only place that inserts, updates or deletes (seed scripts excepted) |
-| `schemas.ts` | Zod schemas for this domain's inputs | Shared by the form and the server |
+| `schemas.ts` | Zod schemas for this domain's inputs | Shared by the form and the server. Schemas that a **browser form** uses live in `src/lib/schemas/<domain>.ts` instead, because browser code cannot import `src/server`; the server imports them from there. Server-only schemas stay in the domain folder |
 
 ## 4. Conventions
 

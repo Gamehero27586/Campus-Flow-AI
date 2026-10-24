@@ -1,3 +1,5 @@
-// Tables are added one file per domain, starting with Slice 1 (see docs/data-model.md).
-// Slice 0 has no tables yet.
-export {};
+// One file per domain (docs/folder-structure.md §3). Add new tables here as slices need them.
+export * from "./enums";
+export * from "./access";
+export * from "./auth";
+export * from "./audit";
