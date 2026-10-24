@@ -136,6 +136,19 @@ Slices and hours are in `mvp-scope.md` §11. Two checkpoints:
 
 Choices Opus made where the owner had not answered; the owner may change any of them: `input: false` instead of a separate profile table; refusing role changes; immutable usernames; the 5, 10 and 3 thresholds; faculty being **eligible** (off by default) for personal tasks, the personal tracker and AI.
 
+## 16. Slice 0 outcomes (24 Oct 2026)
+
+- **Neon: database only.** Neon Auth is not used (Better Auth runs inside the app so the hardening rules in `permissions.md` and the same-transaction audit writes are under our control, and it must work offline against local Postgres). Neon has no role in file storage; files stay on local disk.
+- **Next.js 16.4.3 template defaults changed:** `cacheComponents` and `partialPrefetching` are **off**. Every page reads the signed-in user, so rendering is per request; the older caching model is simpler to explain and review. `use cache` is not used. Revisit only if a page needs it.
+- **Tailwind v4 setup** is the one `create-next-app` generated (`@tailwindcss/turbopack` rule in `next.config.ts`). Theme tokens use the hex values from `color-palette.md` directly (shadcn writes OKLCH by default, but hex works in the same variables). Dark mode block removed. Variable names are unchanged. `chart-4` and `chart-5` removed (three series only).
+- **Node:** `engines.node >= 24`; `@types/node` ^24 (Vitest 5 needs 22 or newer). Owner runs Node 26.7.
+- **Test database: PGlite**, checked on 24 Oct 2026: `AT TIME ZONE`, `date_trunc('week' ...)` in a zone, daylight-saving edges, `gen_random_uuid()`, CHECK constraints and partial unique indexes all behave like Postgres. It is added as a dev dependency in the first slice that has database tests (Slice 2 or 3). Triggers (append-only tables) must be re-checked on PGlite then; if one fails, use a local Postgres test database.
+- **Migrations:** `drizzle/0000_baseline.sql` is an intentionally empty baseline, applied to Neon. `drizzle.config.ts` uses `DATABASE_URL_UNPOOLED` when set, otherwise `DATABASE_URL`. `pg` warns that `sslmode=require` is treated as `verify-full`; this is the safe behaviour and needs no change.
+- **`npm audit`:** 4 moderate findings, all one old `esbuild` copy inside `drizzle-kit` (dev-server request issue, dev tool only, never shipped). `npm audit fix --force` would downgrade `drizzle-kit` to 0.18, so it is not applied. CI fails only on high or critical. Re-check each slice; drop this note when drizzle-kit updates.
+- **Git:** the owner runs all git commands that change anything. Claude never commits, branches, tags or pushes unless told to.
+- **Scripts** `seed:base`, `seed:demo`, `admin:promote`, `eval:ai`, `files:cleanup` are added with the slice that creates them, not before.
+- **Not yet done from the Slice 0 checklist:** Dependabot alerts on in GitHub (a repository setting the owner switches on), a local PostgreSQL database (owner is installing it later), `npx playwright install` (needed when the first e2e flow is written).
+
 ## 15. Still open
 
 1. **D4:** should secondary buttons stay coral (with dark text), or become teal outline with coral kept as the accent? Decide before Slice 3, when the first real screens are built.

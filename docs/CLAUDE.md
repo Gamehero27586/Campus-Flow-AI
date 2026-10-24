@@ -16,6 +16,7 @@ A final-year project: a Next.js web app where students, faculty and an admin man
 ## How to work with the owner
 
 - Work in **slices** (`mvp-scope.md` §11). One branch per slice, `main` always works, tag `slice-N-done`.
+- **Git is the owner's job.** Never run a git command that changes anything (add, commit, branch, checkout, merge, tag, push, stash, reset) unless the owner tells you to. Read-only commands (`status`, `diff`, `log`) are fine. At the end of a slice, give the owner the commands to run.
 - Before a slice: say what you will build, which files, and what the owner should test. After: say what changed and how to try it. For auth, permissions and file handling, point out the lines the owner must read carefully.
 - Explain choices in plain language. Prefer boring, predictable code. Do not add features, libraries or abstractions that are not in the documents; propose them first.
 - If a document is unclear or two documents disagree, stop and ask. Do not guess on permissions, deadlines, metrics or visibility.
@@ -27,7 +28,9 @@ A final-year project: a Next.js web app where students, faculty and an admin man
 
 Next.js 16 App Router (`src/`), TypeScript strict, PostgreSQL (Neon, local fallback) via Drizzle with the **`pg` driver** (never `neon-http`), Better Auth, Tailwind and shadcn/ui, Zod, react-hook-form, Vitest and Playwright. Package manager: **npm**.
 
-Scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `test`, `test:e2e`, `db:generate`, `db:migrate`, `db:studio`, `seed:base`, `seed:demo`, `admin:promote`, `eval:ai`, `files:cleanup`.
+Scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `format`, `test`, `test:e2e`, `db:generate`, `db:migrate`, `db:studio`, and, added with the slice that needs them, `seed:base`, `seed:demo`, `admin:promote`, `eval:ai`, `files:cleanup`.
+
+Next.js 16 ships its own documentation in `node_modules/next/dist/docs/`; read the relevant page there before using a Next.js API (`AGENTS.md` says the same).
 
 Migrations: `db:generate` and `db:migrate`, committed, never edited after being applied.
 
