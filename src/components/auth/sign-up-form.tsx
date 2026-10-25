@@ -69,7 +69,7 @@ export function SignUpForm({ googleEnabled }: { googleEnabled: boolean }) {
       {googleEnabled ? <GoogleButton /> : null}
       <p className="text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/sign-in" className="font-medium text-primary underline underline-offset-4">
+        <Link href="/sign-in" className="font-medium text-brand underline underline-offset-4">
           Sign in
         </Link>
       </p>

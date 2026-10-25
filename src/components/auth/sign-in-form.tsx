@@ -71,7 +71,7 @@ export function SignInForm({
       {googleEnabled ? <GoogleButton /> : null}
       <p className="text-sm text-muted-foreground">
         New here?{" "}
-        <Link href="/sign-up" className="font-medium text-primary underline underline-offset-4">
+        <Link href="/sign-up" className="font-medium text-brand underline underline-offset-4">
           Create an account
         </Link>
       </p>

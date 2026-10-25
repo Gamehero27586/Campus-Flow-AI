@@ -20,6 +20,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Excluded: Better Auth, the upload and download routes (Next.js truncates bodies over 10 MB here), and static files.
-  matcher: ["/((?!api/auth|api/uploads|api/files|_next/static|_next/image|favicon.ico).*)"],
+  // Excluded: Better Auth, the upload and download routes (Next.js truncates bodies over 10 MB here),
+  // and static files: the logo folder, the icon, and anything in public/ with an image or font extension.
+  // Without the static exclusions a signed-out visitor's image requests are redirected to /sign-in.
+  matcher: [
+    "/((?!api/auth|api/uploads|api/files|_next/static|_next/image|brand/|favicon.ico|icon.svg|.*\\.(?:png|jpg|jpeg|svg|webp|ico|woff2?)$).*)",
+  ],
 };

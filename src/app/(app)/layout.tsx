@@ -6,17 +6,18 @@ import { requirePermission } from "@/server/policies/authorize";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, permissions } = await requirePermission(null);
 
+  // Settings is in the user menu at the bottom of the sidebar, not here.
   const navItems: NavItem[] = [
     ...(permissions.has("dashboard.view") ? [{ href: "/dashboard", label: "Dashboard" }] : []),
     ...(permissions.has("admin.users.manage") ? [{ href: "/admin/users", label: "Users" }] : []),
-    { href: "/settings", label: "Settings" },
   ];
 
   return (
     <AppShell
       navItems={navItems}
       userName={user.displayUsername ?? user.name}
-      roleLabel={user.roleKey ? user.roleKey[0].toUpperCase() + user.roleKey.slice(1) : "No role"}
+      userEmail={user.email}
+      roleKey={user.roleKey}
     >
       {children}
     </AppShell>

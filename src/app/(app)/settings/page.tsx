@@ -1,3 +1,4 @@
+import { ThemeSwitch } from "@/components/theme/theme-switch";
 import { env } from "@/env";
 import { listTimeZones } from "@/lib/schemas/settings";
 import { requirePermission } from "@/server/policies/authorize";
@@ -23,7 +24,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         linked={linked === "google"}
         error={typeof error === "string" ? error : null}
       />
-      <h1 className="text-2xl font-semibold text-primary">Settings</h1>
+      <h1 className="text-2xl font-semibold text-brand">Settings</h1>
 
       <section aria-labelledby="account-heading" className="space-y-2">
         <h2 id="account-heading" className="text-lg font-medium">
@@ -37,6 +38,17 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
           <dt className="text-muted-foreground">Email</dt>
           <dd>{user.email}</dd>
         </dl>
+      </section>
+
+      <section aria-labelledby="appearance-heading" className="space-y-3">
+        <h2 id="appearance-heading" className="text-lg font-medium">
+          Appearance
+        </h2>
+        <ThemeSwitch className="max-w-sm" />
+        <p className="text-sm text-muted-foreground">
+          System follows your computer&apos;s light or dark setting. The choice is saved in this
+          browser.
+        </p>
       </section>
 
       <section aria-labelledby="signin-heading" className="space-y-3">

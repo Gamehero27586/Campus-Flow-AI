@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RoleBadge } from "@/components/layout/role-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -11,7 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { type AdminUserRow, listUsersForAdmin } from "@/server/admin/queries";
 import { requirePermission } from "@/server/policies/authorize";
-import { ApproveForm, RejectForm } from "@/app/(app)/admin/users/review-forms";
+import { ApproveForm, RejectForm, ResetToPendingForm } from "@/app/(app)/admin/users/review-forms";
 
 const STATUSES = ["pending", "active", "rejected", "deactivated"] as const;
 const STATUS_LABELS: Record<AdminUserRow["status"], string> = {
@@ -34,7 +35,7 @@ export default async function AdminUsersPage({ searchParams }: PageProps<"/admin
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-primary">Users</h1>
+      <h1 className="text-2xl font-semibold text-brand">Users</h1>
 
       <nav aria-label="Filter by status" className="flex flex-wrap gap-2">
         {[...STATUSES, "all" as const].map((status) => {
@@ -46,7 +47,7 @@ export default async function AdminUsersPage({ searchParams }: PageProps<"/admin
               aria-current={isSelected ? "page" : undefined}
               className={cn(
                 "rounded-md border px-3 py-1.5 text-sm font-medium",
-                isSelected ? "border-primary bg-teal-soft text-primary" : "bg-card hover:bg-muted",
+                isSelected ? "border-brand bg-teal-soft text-brand" : "bg-card hover:bg-muted",
               )}
             >
               {status === "all" ? "All" : STATUS_LABELS[status]}
@@ -91,21 +92,36 @@ export default async function AdminUsersPage({ searchParams }: PageProps<"/admin
                   </TableCell>
                   <TableCell className="align-top">
                     <div>{STATUS_LABELS[row.status]}</div>
-                    {row.roleKey ? (
-                      <div className="text-sm text-muted-foreground">{row.roleKey}</div>
-                    ) : null}
+                    {row.roleKey ? <RoleBadge roleKey={row.roleKey} className="mt-1" /> : null}
                     {row.rejectionReason ? (
                       <div className="text-sm text-muted-foreground">{row.rejectionReason}</div>
                     ) : null}
                   </TableCell>
                   <TableCell className="align-top">{row.requestedRole ?? "None"}</TableCell>
                   <TableCell className="min-w-72 align-top">
-                    {row.status !== "pending" ? (
+                    {row.status !== "pending" && row.status !== "rejected" ? (
                       <span className="text-sm text-muted-foreground">No action</span>
                     ) : row.id === user.id ? (
                       <span className="text-sm text-muted-foreground">
                         You cannot review your own account.
                       </span>
+                    ) : row.status === "rejected" ? (
+                      // Rejected by mistake: reapprove with a role, or send back to the pending list.
+                      <div className="space-y-3">
+                        {row.username ? (
+                          <ApproveForm
+                            mode="reapprove"
+                            userId={row.id}
+                            emailVerified={row.emailVerified}
+                            requestedRole={row.requestedRole}
+                          />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            Has not chosen a username yet.
+                          </span>
+                        )}
+                        <ResetToPendingForm userId={row.id} />
+                      </div>
                     ) : !row.username ? (
                       <span className="text-sm text-muted-foreground">
                         Has not chosen a username yet.

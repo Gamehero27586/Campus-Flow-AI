@@ -2,11 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Theme tokens from docs/color-palette.md §4. Light mode only in the MVP.
-   Components use these tokens (bg-primary, text-muted-foreground ...), never raw hex values. */
-
-/* Light mode only: `dark:` styles in shadcn components apply only inside a .dark element, which the app never sets.
-   Without this line Tailwind would follow the operating system's dark-mode setting. */
+/* Theme tokens from docs/color-palette.md (light: §4, dark: §6). Components use these tokens
+   (bg-primary, text-muted-foreground, text-brand ...), never raw hex values.
+   The theme is chosen by a cookie (see src/lib/theme.ts): the `dark` class on <html> switches the set. */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -49,6 +47,10 @@
   --color-amber-strong: var(--amber-strong);
   --color-amber-soft: var(--amber-soft);
   --color-teal-soft: var(--teal-soft);
+  --color-brand: var(--brand);
+  --color-brand-panel: var(--brand-panel);
+  --color-brand-chip: var(--brand-chip);
+  --color-disabled: var(--disabled);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -59,6 +61,8 @@
 }
 
 :root {
+  color-scheme: light;
+
   --background: #faf7f2;
   --foreground: #2b2b2b;
   --card: #ffffff;
@@ -87,6 +91,15 @@
   --amber-strong: #8a5a00;
   --amber-soft: #fef3c7;
   --teal-soft: #e6f0ef;
+  --disabled: #8a8478;
+
+  /* Teal for text, links and headings. In light mode it is the primary teal; in dark mode the
+     Signature Teal is too dark to read on the background, so it becomes a lighter teal. */
+  --brand: #0d4f4c;
+  /* The background of the logo on the sign-in and sign-up pages (sampled from the logo file). */
+  --brand-panel: #f8f4ea;
+  /* The small logo tile is dark teal in both themes. */
+  --brand-chip: #0c3b3e;
 
   /* Chart series (color-palette.md §5): teal, coral-strong, amber-strong */
   --chart-1: #0d4f4c;
@@ -101,6 +114,59 @@
   --sidebar-primary-foreground: #2b2b2b;
   --sidebar-accent: rgb(255 255 255 / 12%);
   --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 20%);
+  --sidebar-ring: #f2b84b;
+}
+
+/* Dark theme: the owner's palette (Midnight Blackboard, Deep Teal, Signature Teal, Slate Teal,
+   Warm Chalk, Muted Sage, Soft Coral, Chalk Amber, Muted Teal, Muted Grey) plus derived colours.
+   Every text and control pair is checked in tests/unit/theme-contrast.test.ts. */
+.dark {
+  color-scheme: dark;
+
+  --background: #121f1e;
+  --foreground: #faf7f2;
+  --card: #203331;
+  --card-foreground: #faf7f2;
+  --popover: #203331;
+  --popover-foreground: #faf7f2;
+  --primary: #0d4f4c;
+  --primary-foreground: #faf7f2;
+  --secondary: #f0806a;
+  --secondary-foreground: #121f1e;
+  --muted: #1a2a28;
+  --muted-foreground: #b7c7c2;
+  --accent: #f2b84b;
+  --accent-foreground: #121f1e;
+  --destructive: #f87171;
+  --destructive-foreground: #121f1e;
+  --border: #36514d;
+  /* Lighter than --border so text fields keep a 3:1 outline (cards and dividers use --border). */
+  --input: #668781;
+  --ring: #5cc4b8;
+
+  --success: #5bd38a;
+  --info: #8ab4ff;
+  --coral-strong: #f0806a;
+  --amber-strong: #f2b84b;
+  --amber-soft: #3a2e10;
+  --teal-soft: #1e3a38;
+  --disabled: #71817c;
+
+  --brand: #5cc4b8;
+  --brand-panel: #0c3b3e;
+  --brand-chip: #0c3b3e;
+
+  --chart-1: #5cc4b8;
+  --chart-2: #f0806a;
+  --chart-3: #f2b84b;
+
+  --sidebar: #163b39;
+  --sidebar-foreground: #faf7f2;
+  --sidebar-primary: #f2b84b;
+  --sidebar-primary-foreground: #121f1e;
+  --sidebar-accent: rgb(255 255 255 / 12%);
+  --sidebar-accent-foreground: #faf7f2;
   --sidebar-border: rgb(255 255 255 / 20%);
   --sidebar-ring: #f2b84b;
 }

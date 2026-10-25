@@ -1,13 +1,15 @@
 "use client";
 
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { useTheme } from "@/components/theme/theme-provider";
 
-// Toasts use the theme tokens from color-palette.md and are always light (the MVP is light-only).
-// Every toast carries words and an icon, so colour is never the only cue.
+// Toasts use the theme tokens from color-palette.md and follow the app's theme (the cookie-driven
+// `dark` class). Every toast carries words and an icon, so colour is never the only cue.
 export function Toaster(props: ToasterProps) {
+  const { theme } = useTheme();
   return (
     <Sonner
-      theme="light"
+      theme={theme}
       position="top-center"
       style={
         {

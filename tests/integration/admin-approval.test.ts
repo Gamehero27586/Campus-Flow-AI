@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { approveUser, rejectUser } from "@/server/admin/commands";
+import {
+  approveUser,
+  reapproveUser,
+  rejectUser,
+  resetRejectedToPending,
+} from "@/server/admin/commands";
 import { listUsersForAdmin } from "@/server/admin/queries";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { seedBase } from "@/server/auth/seed-base";
@@ -211,6 +216,203 @@ describe("rejectUser()", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("not_pending");
     expect((await reload(target.id)).status).toBe("active");
+  });
+});
+
+describe("reapproveUser() (an account rejected by mistake)", () => {
+  async function rejectedUser(overrides: Partial<typeof users.$inferInsert> = {}) {
+    return insertUser(testDb, {
+      status: "rejected",
+      rejectionReason: "Rejected by mistake",
+      emailVerified: true,
+      ...overrides,
+    });
+  }
+
+  it("activates the account with the chosen role, clears the reason and records who did it", async () => {
+    const target = await rejectedUser();
+    const result = await reapproveUser(admin, {
+      userId: target.id,
+      role: "faculty",
+      confirmedEmailOwner: false,
+    });
+
+    expect(result.ok).toBe(true);
+    const after = await reload(target.id);
+    const [facultyRole] = await testDb.select().from(roles).where(eq(roles.key, "faculty"));
+    expect(after.status).toBe("active");
+    expect(after.roleId).toBe(facultyRole.id);
+    expect(after.rejectionReason).toBeNull();
+    expect(after.approvedBy).toBe(admin.id);
+    expect(after.approvedAt).not.toBeNull();
+  });
+
+  it("writes a reapproval audit row that keeps the reason it overrides", async () => {
+    const target = await rejectedUser({ rejectionReason: "Wrong email domain" });
+    await reapproveUser(admin, { userId: target.id, role: "student", confirmedEmailOwner: false });
+
+    const audit = await testDb.select().from(auditLogs);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      actorId: admin.id,
+      action: "user.reapproved",
+      targetId: target.id,
+    });
+    expect(audit[0].details).toMatchObject({
+      role: "student",
+      previousRejectionReason: "Wrong email domain",
+    });
+  });
+
+  it("still needs the email-ownership confirmation for an unverified email", async () => {
+    const target = await rejectedUser({ emailVerified: false });
+    const refused = await reapproveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: false,
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.code).toBe("email_unconfirmed");
+    expect((await reload(target.id)).status).toBe("rejected");
+
+    const allowed = await reapproveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: true,
+    });
+    expect(allowed.ok).toBe(true);
+  });
+
+  it.each(["pending", "active", "deactivated"] as const)(
+    "refuses an account that is %s, not rejected",
+    async (status) => {
+      const target = await rejectedUser({ status });
+      const result = await reapproveUser(admin, {
+        userId: target.id,
+        role: "student",
+        confirmedEmailOwner: true,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("not_rejected");
+      expect((await reload(target.id)).status).toBe(status);
+    },
+  );
+
+  it("refuses to reapprove your own account", async () => {
+    const own = await rejectedUser();
+    const result = await reapproveUser(asCurrentUser(own), {
+      userId: own.id,
+      role: "student",
+      confirmedEmailOwner: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("self_action");
+    expect((await reload(own.id)).status).toBe("rejected");
+  });
+
+  it("refuses an account with no username and points to moving it back to pending", async () => {
+    const target = await rejectedUser({ username: null });
+    const result = await reapproveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("welcome_incomplete");
+      expect(result.error.message).toMatch(/back to pending/i);
+    }
+  });
+
+  it("a second reapproval loses cleanly and writes no second audit row", async () => {
+    const target = await rejectedUser();
+    const input = { userId: target.id, role: "student" as const, confirmedEmailOwner: true };
+    const first = await reapproveUser(admin, input);
+    const second = await reapproveUser(admin, input);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(await testDb.select().from(auditLogs)).toHaveLength(1);
+  });
+
+  it("rolls back if the audit row cannot be written (same transaction)", async () => {
+    const target = await rejectedUser();
+    const ghost: CurrentUser = { ...admin, id: randomUUID() };
+    await expect(
+      reapproveUser(ghost, { userId: target.id, role: "student", confirmedEmailOwner: true }),
+    ).rejects.toThrow();
+    const after = await reload(target.id);
+    expect(after.status).toBe("rejected");
+    expect(after.rejectionReason).toBe("Rejected by mistake");
+    expect(after.roleId).toBeNull();
+  });
+
+  it("does not change what approving a pending account does", async () => {
+    const target = await pendingUser();
+    const wrong = await reapproveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: true,
+    });
+    expect(wrong.ok).toBe(false);
+    const right = await approveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: true,
+    });
+    expect(right.ok).toBe(true);
+    const audit = await testDb.select().from(auditLogs);
+    expect(audit.map((row) => row.action)).toEqual(["user.approved"]);
+  });
+});
+
+describe("resetRejectedToPending()", () => {
+  it("moves a rejected account back to the pending list and clears the reason", async () => {
+    const target = await insertUser(testDb, { status: "rejected", rejectionReason: "Mistake" });
+    const result = await resetRejectedToPending(admin, { userId: target.id });
+
+    expect(result.ok).toBe(true);
+    const after = await reload(target.id);
+    expect(after.status).toBe("pending");
+    expect(after.rejectionReason).toBeNull();
+    expect(after.roleId).toBeNull();
+
+    const audit = await testDb.select().from(auditLogs);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ action: "user.reset_to_pending", targetId: target.id });
+    expect(audit[0].details).toMatchObject({ previousRejectionReason: "Mistake" });
+  });
+
+  it("then the account can be approved from the pending list as usual", async () => {
+    const target = await insertUser(testDb, { status: "rejected", emailVerified: true });
+    await resetRejectedToPending(admin, { userId: target.id });
+    const result = await approveUser(admin, {
+      userId: target.id,
+      role: "student",
+      confirmedEmailOwner: false,
+    });
+    expect(result.ok).toBe(true);
+    expect((await reload(target.id)).status).toBe("active");
+  });
+
+  it.each(["pending", "active", "deactivated"] as const)(
+    "refuses an account that is %s",
+    async (status) => {
+      const target = await insertUser(testDb, { status });
+      const result = await resetRejectedToPending(admin, { userId: target.id });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("not_rejected");
+      expect((await reload(target.id)).status).toBe(status);
+    },
+  );
+
+  it("refuses your own account and an unknown account", async () => {
+    const own = await insertUser(testDb, { status: "rejected" });
+    const self = await resetRejectedToPending(asCurrentUser(own), { userId: own.id });
+    const unknown = await resetRejectedToPending(admin, { userId: randomUUID() });
+    expect(self.ok).toBe(false);
+    expect(unknown.ok).toBe(false);
+    if (!self.ok) expect(self.error.code).toBe("self_action");
+    if (!unknown.ok) expect(unknown.error.code).toBe("not_found");
   });
 });
 

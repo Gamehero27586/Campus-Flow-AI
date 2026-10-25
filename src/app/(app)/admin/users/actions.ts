@@ -3,8 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { fail, type FormState } from "@/lib/result";
-import { approveUser, rejectUser } from "@/server/admin/commands";
+import {
+  approveUser,
+  reapproveUser,
+  rejectUser,
+  resetRejectedToPending,
+} from "@/server/admin/commands";
 import { authorize } from "@/server/policies/authorize";
+
+const resetSchema = z.object({ userId: z.uuid() });
 
 const approveSchema = z.object({
   userId: z.uuid(),
@@ -42,6 +49,48 @@ export async function approveUserAction(
 
   revalidatePath("/admin/users");
   return { ok: true, message: "Approved." };
+}
+
+/** Rejected to active, for an account rejected by mistake. Same keys as approving. */
+export async function reapproveUserAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const parsed = approveSchema.safeParse({
+    userId: formData.get("userId"),
+    role: formData.get("role"),
+    confirmedEmailOwner: formData.get("confirmedEmailOwner"),
+  });
+  if (!parsed.success) {
+    return fail("invalid_input", "Choose a role.", z.flattenError(parsed.error).fieldErrors);
+  }
+
+  const authorization = await authorize(["admin.users.manage", "admin.users.assign_role"]);
+  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+
+  const result = await reapproveUser(authorization.user, parsed.data);
+  if (!result.ok) return result;
+
+  revalidatePath("/admin/users");
+  return { ok: true, message: "Reapproved." };
+}
+
+/** Rejected back to the pending list. Sets no role, so it needs only admin.users.manage. */
+export async function resetToPendingAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const parsed = resetSchema.safeParse({ userId: formData.get("userId") });
+  if (!parsed.success) return fail("invalid_input", "That account was not recognised.");
+
+  const authorization = await authorize("admin.users.manage");
+  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+
+  const result = await resetRejectedToPending(authorization.user, parsed.data);
+  if (!result.ok) return result;
+
+  revalidatePath("/admin/users");
+  return { ok: true, message: "Moved back to pending." };
 }
 
 export async function rejectUserAction(

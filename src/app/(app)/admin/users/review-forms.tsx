@@ -5,18 +5,30 @@ import { FieldError, FormMessage } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { FormState } from "@/lib/result";
-import { approveUserAction, rejectUserAction } from "@/app/(app)/admin/users/actions";
+import {
+  approveUserAction,
+  reapproveUserAction,
+  rejectUserAction,
+  resetToPendingAction,
+} from "@/app/(app)/admin/users/actions";
 
+/** Approve a pending account, or reapprove one that was rejected by mistake (same fields, same checks). */
 export function ApproveForm({
   userId,
   emailVerified,
   requestedRole,
+  mode = "approve",
 }: {
   userId: string;
   emailVerified: boolean;
   requestedRole: "student" | "faculty" | null;
+  mode?: "approve" | "reapprove";
 }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(approveUserAction, null);
+  const reapprove = mode === "reapprove";
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    reapprove ? reapproveUserAction : approveUserAction,
+    null,
+  );
 
   return (
     <form action={action} className="space-y-2">
@@ -35,7 +47,13 @@ export function ApproveForm({
           <option value="faculty">Faculty</option>
         </select>
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Approving..." : "Approve"}
+          {pending
+            ? reapprove
+              ? "Reapproving..."
+              : "Approving..."
+            : reapprove
+              ? "Reapprove"
+              : "Approve"}
         </Button>
       </div>
       {!emailVerified ? (
@@ -51,6 +69,21 @@ export function ApproveForm({
       ) : null}
       {state && !state.ok ? <FormMessage>{state.error.message}</FormMessage> : null}
       {state?.ok ? <FormMessage tone="success">{state.message}</FormMessage> : null}
+    </form>
+  );
+}
+
+/** Takes a rejected account out of the rejected list and back into the approval queue. */
+export function ResetToPendingForm({ userId }: { userId: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(resetToPendingAction, null);
+
+  return (
+    <form action={action} className="space-y-2">
+      <input type="hidden" name="userId" value={userId} />
+      <Button type="submit" size="sm" variant="outline" disabled={pending}>
+        {pending ? "Moving..." : "Move back to pending"}
+      </Button>
+      {state && !state.ok ? <FormMessage>{state.error.message}</FormMessage> : null}
     </form>
   );
 }

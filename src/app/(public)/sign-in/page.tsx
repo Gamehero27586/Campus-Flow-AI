@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { AuthCard } from "@/components/auth/auth-card";
+import { AuthSplit } from "@/components/auth/auth-card";
 import { SignInForm } from "@/components/auth/sign-in-form";
 import { env } from "@/env";
 import { googleErrorMessage } from "@/lib/auth-messages";
@@ -16,8 +16,8 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
   const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 
   return (
-    <AuthCard title="Sign in" description="Welcome back.">
+    <AuthSplit title="Sign in" description="Welcome back.">
       <SignInForm googleEnabled={googleEnabled} googleError={googleError} />
-    </AuthCard>
+    </AuthSplit>
   );
 }
