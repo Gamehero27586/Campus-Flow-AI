@@ -26,10 +26,26 @@ npm run admin:promote -- you@example.com
 
 It refuses if an active Admin already exists. After that, new accounts are approved from the Users page.
 
+## Test and live databases
+
+`DATABASE_URL` in `.env.local` is the **test** database while developing; the live database is a separate Neon project whose string waits, unused, in `DATABASE_URL_LIVE`. On the test database you can start over at any time (needed because the audit log can never be edited or deleted):
+
+```powershell
+npm run db:reset                    # wipes the test database, re-applies migrations, re-seeds roles and permissions
+npm run admin:promote -- you@example.com   # after signing up again
+```
+
+`db:reset` refuses to run unless `DEV_DB_RESET_ALLOWED=yes` is in `.env.local`, and refuses if `DATABASE_URL` is the live database. With that marker on, the app also refuses to start on any address except localhost.
+
+Test accounts can share one password without it being written anywhere: copy one account's password hash to the others in the Neon console (the statement is in `docs/decisions.md` §18). The browser tests read the Admin's login from `E2E_ADMIN_EMAIL` and `E2E_ADMIN_PASSWORD` in `.env.local`.
+
 ## Checks
 
 ```powershell
 npm run typecheck
 npm run lint
 npm run test
+npm run test:e2e                    # builds, starts the app on port 3100, runs the browser flows
 ```
+
+If a page looks old after switching branches or merging, stop `npm run dev`, delete the `.next` folder (`Remove-Item -Recurse -Force .next`), run `npm install`, and start it again.

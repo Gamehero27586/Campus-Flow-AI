@@ -1,82 +1,60 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
-import { fail, ok } from "@/lib/result";
+import { fail, type Failure, ok } from "@/lib/result";
 import { now } from "@/lib/time";
+import {
+  ACTIVATION_FROM,
+  activationRules,
+  type ActivationMode,
+  type ApproveInput,
+  type RejectInput,
+  rejectionRules,
+  resetToPendingRules,
+  type UserTarget,
+} from "@/server/admin/policy";
+import { findUserTarget } from "@/server/admin/queries";
 import { writeAudit } from "@/server/audit/write-audit";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { db } from "@/server/db/client";
 import { roles, users } from "@/server/db/schema";
+import { decisionToFailure } from "@/server/policies/decision";
+import { type RecordRules, runRules } from "@/server/policies/evaluate-record";
 
-// Writes for the Admin users page. The caller (a server action) has already run authorize():
+// Writes for the Admin users page. The caller (a server action) has already run authorizeRecord():
 // admin.users.manage to reject or move back to pending, and that plus admin.users.assign_role to
-// approve or reapprove (both set a role). These commands still enforce the rules that do not depend
-// on the role.
+// approve or reapprove (both set a role). The rules themselves are in policy.ts. Each command calls
+// them again on the row it reads INSIDE its transaction, so a change made a moment ago is caught,
+// and then writes with a conditional UPDATE ... WHERE status = ..., so two Admins clicking at once
+// cannot both win.
 
-export type ApproveInput = {
-  userId: string;
-  /** Approval offers Student and Faculty. Making someone Admin is a separate action (Slice 10). */
-  role: "student" | "faculty";
-  /** Required when the account's email is not verified (the Admin has checked with the person). */
-  confirmedEmailOwner: boolean;
-};
+export type { ApproveInput, RejectInput };
 
-// Approving a pending account and reapproving a rejected one are the same change with a different
-// starting status, so they share one code path (and one set of tests).
-const ACTIVATION = {
-  approve: {
-    from: "pending",
-    action: "user.approved",
-    self: "You cannot approve your own account.",
-    wrongStatus: ["not_pending", "That account is not waiting for approval."],
-  },
-  reapprove: {
-    from: "rejected",
-    action: "user.reapproved",
-    self: "You cannot reapprove your own account.",
-    wrongStatus: ["not_rejected", "That account is not in the rejected list."],
-  },
-} as const;
+// The Admin rules do not read permissions (the action already checked the keys), so the commands pass none.
+const NO_PERMISSIONS: ReadonlySet<string> = new Set();
 
-async function activateAccount(
+type Checked = { ok: false; failure: Failure } | { ok: true; target: UserTarget };
+
+/** Reads the target and applies a rule set. Returns the target, or the failure to hand back. */
+async function checkTarget(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   actor: CurrentUser,
-  input: ApproveInput,
-  mode: keyof typeof ACTIVATION,
-) {
-  const rule = ACTIVATION[mode];
-  const [wrongCode, wrongMessage] = rule.wrongStatus;
+  userId: string,
+  rules: RecordRules<UserTarget>,
+): Promise<Checked> {
+  const target = await findUserTarget(tx, userId);
+  if (!target) return { ok: false, failure: fail("not_found", "That account was not found.") };
+  const decision = runRules(rules, { user: actor, permissions: NO_PERMISSIONS, record: target });
+  if (!decision.allow) return { ok: false, failure: decisionToFailure(decision) };
+  return { ok: true, target };
+}
 
-  // Rule 4 in permissions.md §6: nobody approves themselves.
-  if (input.userId === actor.id) return fail("self_action", rule.self);
+async function activateAccount(actor: CurrentUser, input: ApproveInput, mode: ActivationMode) {
+  const from = ACTIVATION_FROM[mode];
 
   return db.transaction(async (tx) => {
-    // Only the columns this command uses (no password data, no unrelated fields).
-    const [target] = await tx
-      .select({
-        id: users.id,
-        status: users.status,
-        username: users.username,
-        emailVerified: users.emailVerified,
-        requestedRole: users.requestedRole,
-        rejectionReason: users.rejectionReason,
-      })
-      .from(users)
-      .where(eq(users.id, input.userId));
-    if (!target) return fail("not_found", "That account was not found.");
-    if (target.status !== rule.from) return fail(wrongCode, wrongMessage);
-    if (!target.username) {
-      return fail(
-        "welcome_incomplete",
-        mode === "reapprove"
-          ? "That person has not chosen a username yet. Move them back to pending instead."
-          : "That person has not chosen a username yet.",
-      );
-    }
-    if (!target.emailVerified && !input.confirmedEmailOwner) {
-      return fail(
-        "email_unconfirmed",
-        "This email is not verified. Confirm that you have checked the person owns it.",
-      );
-    }
+    const checked = await checkTarget(tx, actor, input.userId, activationRules(input, mode));
+    if (!checked.ok) return checked.failure;
+    const { target } = checked;
 
     const [role] = await tx.select({ id: roles.id }).from(roles).where(eq(roles.key, input.role));
     if (!role) return fail("role_missing", "That role does not exist. Run npm run seed:base.");
@@ -91,13 +69,20 @@ async function activateAccount(
         approvedAt: now(),
         rejectionReason: null,
       })
-      .where(and(eq(users.id, target.id), eq(users.status, rule.from)))
+      .where(and(eq(users.id, target.id), eq(users.status, from)))
       .returning({ id: users.id });
-    if (updated.length === 0) return fail(wrongCode, wrongMessage);
+    if (updated.length === 0) {
+      return fail(
+        mode === "approve" ? "not_pending" : "not_rejected",
+        mode === "approve"
+          ? "That account is not waiting for approval."
+          : "That account is not in the rejected list.",
+      );
+    }
 
     await writeAudit(tx, {
       actorId: actor.id,
-      action: rule.action,
+      action: mode === "approve" ? "user.approved" : "user.reapproved",
       targetType: "user",
       targetId: target.id,
       details: {
@@ -124,29 +109,20 @@ export function reapproveUser(actor: CurrentUser, input: ApproveInput) {
   return activateAccount(actor, input, "reapprove");
 }
 
-export type RejectInput = { userId: string; reason: string | null };
-
 export async function rejectUser(actor: CurrentUser, input: RejectInput) {
-  if (input.userId === actor.id) {
-    return fail("self_action", "You cannot reject your own account.");
-  }
-
   return db.transaction(async (tx) => {
-    const [target] = await tx
-      .select({ id: users.id, status: users.status, requestedRole: users.requestedRole })
-      .from(users)
-      .where(eq(users.id, input.userId));
-    if (!target) return fail("not_found", "That account was not found.");
-    if (target.status !== "pending")
-      return fail("not_pending", "That account is not waiting for approval.");
+    const checked = await checkTarget(tx, actor, input.userId, rejectionRules());
+    if (!checked.ok) return checked.failure;
+    const { target } = checked;
 
     const updated = await tx
       .update(users)
       .set({ status: "rejected", rejectionReason: input.reason })
       .where(and(eq(users.id, target.id), eq(users.status, "pending")))
       .returning({ id: users.id });
-    if (updated.length === 0)
+    if (updated.length === 0) {
       return fail("not_pending", "That account is not waiting for approval.");
+    }
 
     await writeAudit(tx, {
       actorId: actor.id,
@@ -166,27 +142,19 @@ export async function rejectUser(actor: CurrentUser, input: RejectInput) {
  * admin.users.manage.
  */
 export async function resetRejectedToPending(actor: CurrentUser, input: { userId: string }) {
-  if (input.userId === actor.id) {
-    return fail("self_action", "You cannot change your own account.");
-  }
-
   return db.transaction(async (tx) => {
-    const [target] = await tx
-      .select({ id: users.id, status: users.status, rejectionReason: users.rejectionReason })
-      .from(users)
-      .where(eq(users.id, input.userId));
-    if (!target) return fail("not_found", "That account was not found.");
-    if (target.status !== "rejected") {
-      return fail("not_rejected", "That account is not in the rejected list.");
-    }
+    const checked = await checkTarget(tx, actor, input.userId, resetToPendingRules());
+    if (!checked.ok) return checked.failure;
+    const { target } = checked;
 
     const updated = await tx
       .update(users)
       .set({ status: "pending", rejectionReason: null })
       .where(and(eq(users.id, target.id), eq(users.status, "rejected")))
       .returning({ id: users.id });
-    if (updated.length === 0)
+    if (updated.length === 0) {
       return fail("not_rejected", "That account is not in the rejected list.");
+    }
 
     await writeAudit(tx, {
       actorId: actor.id,

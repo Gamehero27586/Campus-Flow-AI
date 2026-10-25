@@ -41,6 +41,13 @@ Every action goes through these steps in order. The first failure stops it.
 
 Steps 1 to 3 do not need the record. Steps 4 and 5 do.
 
+**How the code runs it (built in Slice 2).** `authorizeRecord({ required, loadRecord, rules })` in `src/server/policies/authorize.ts` runs all five steps in order and stops at the first failure.
+- `required` is one key or a list that must all be held (approving needs two).
+- `loadRecord({ user, permissions })` loads the record **scoped in the query itself** and runs **only after steps 1 to 3 pass**, so a refused request never reaches the record. It receives the permissions so it can scope as "rows this user is related to, or any row if they may read as Admin". A missing record and a record the scope hides both return nothing, and look identical to the caller.
+- `rules` is the domain's two small functions: `relationship` (step 4) and `state` (step 5). Each returns a `Decision`: allow, or a refusal that is `not_found`, `not_allowed` or `state`.
+- **Use `not_allowed` only when the person may already see the record** (for example a team member changing the status of a task assigned to someone else). In every other case use `not_found`, because "not allowed" tells the person the record exists.
+- A permission is honoured only if the key exists in code **and** the role is eligible for it (`readPermissionKeys`); a stray row in `role_permissions` that breaks the rules is ignored and shown as a problem on the grid.
+
 ## 3. Permission keys, eligible roles and default grants
 
 Keys are defined once in `src/server/auth/permission-keys.ts` with their module, description, **eligible roles** and **default roles**, and seeded into the database. The Admin grid shows every key against every role, but only eligible cells can be ticked; the server refuses any other grant. A **locked** key can never be removed from Admin.
@@ -166,7 +173,7 @@ Each page requires one key; the menu hides pages whose key is missing and the se
 ## 7. Where the checks live
 
 1. **Data access functions (the real enforcement).** Every read and write takes the acting user and scopes the query ("tasks where assignee = this user"), never "task by id". A record the user cannot access is not found. The Admin read access is implemented once here.
-2. **Policy functions**, one small function per rule, for example `canGradeSubmission(user, submission)`, in each domain's `policy.ts`. Plain functions, testable without a browser. Shared helpers (`authorize`, class capacity, Admin access) live in `src/server/policies/`.
+2. **Policy functions**, one small function per rule, for example `canGradeSubmission(user, submission)`, in each domain's `policy.ts` (`src/server/admin/policy.ts` is the first, for the Users page). Plain functions, testable without a browser. They are written as the `relationship` and `state` rules that `authorizeRecord()` runs, and the commands call the same functions again inside their transaction. The conditional `UPDATE ... WHERE status = ...` in a command is race protection, not a second copy of the rule. Shared helpers live in `src/server/policies/`: `authorize.ts`, `evaluate.ts` (steps 1 to 3), `evaluate-record.ts` (steps 1 to 5), `decision.ts`, and `admin-access.ts` (`adminMayRead(permissions, tier)` and `adminMayWrite(permissions, action)`: Admin reads academic and team records through `admin.override`, never personal ones, and writes only the two transfers).
 3. **`proxy.ts` (coarse only).** Redirects visitors with no session cookie to `/sign-in`. It cannot read the database, so it cannot know a username or an account status; that routing is `gate()` in `src/server/auth/access-gate.ts`, which every page calls (decided in Slice 1). Never the only check. Its matcher excludes `/api/auth`, `/api/uploads`, `/api/files` and static files.
 4. **The UI.** Hides buttons and menu items based on the permission set. Convenience only.
 

@@ -47,10 +47,13 @@ campus-flow-ai/
   docs/                     Current planning documents; docs/archive/ is history only
   drizzle/                  Generated SQL migrations (committed)
   eval/                     AI evaluation set (cases.json) and scoring rubric
-  scripts/                  seed-base.ts, seed-demo.ts, admin-promote.ts, eval-ai.ts, files-cleanup.ts
+  scripts/                  seed-base.ts, seed-demo.ts, admin-promote.ts, db-reset.ts (test database only), eval-ai.ts, files-cleanup.ts; lib/ holds the guard that keeps destructive scripts off the live database
   storage/                  Uploaded files (git-ignored, never inside public/)
   public/                   Static assets only
   tests/
+    unit/                   Pure logic (gate, evaluate, rules, themes, messages)
+    integration/            Database tests on an in-memory Postgres with the real migrations
+    permissions/            coverage.test.ts (fails when a server action, page or route is missing its check) and actions-matrix.test.ts (the real actions, every kind of actor)
     e2e/                    Playwright flows
   .github/workflows/ci.yml  Typecheck, lint, test
   src/
@@ -83,7 +86,7 @@ campus-flow-ai/
         client.ts           pg Pool and Drizzle instance
         schema/             One file per domain, plus enums.ts and relations.ts
       auth/                 better-auth.ts (config), session.ts, current-user.ts, permission-keys.ts, load-permissions.ts
-      policies/             authorize.ts and shared helpers (Admin access, class capacity)
+      policies/             authorize.ts, evaluate.ts (steps 1 to 3), evaluate-record.ts (steps 1 to 5), decision.ts, admin-access.ts. Each domain's own rules are in its policy.ts
       audit/                write-audit.ts
       rate-limit.ts         In-memory limiter (join codes, invitations, AI)
       storage/              types.ts (the interface), local.ts, index.ts

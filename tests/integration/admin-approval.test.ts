@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   approveUser,
   reapproveUser,
@@ -32,9 +32,17 @@ beforeAll(async () => {
   admin = asCurrentUser(row, "admin");
 });
 
-beforeEach(async () => {
-  await testDb.delete(auditLogs);
-});
+/**
+ * Audit rows about one account, oldest first. The audit table is append-only, so tests cannot clear
+ * it between cases; each test uses its own accounts and reads only the rows about them.
+ */
+async function auditAbout(targetId: string) {
+  return testDb
+    .select()
+    .from(auditLogs)
+    .where(eq(auditLogs.targetId, targetId))
+    .orderBy(auditLogs.createdAt);
+}
 
 async function pendingUser(overrides: Partial<typeof users.$inferInsert> = {}) {
   return insertUser(testDb, { status: "pending", emailVerified: true, ...overrides });
@@ -69,7 +77,7 @@ describe("approveUser()", () => {
     const target = await pendingUser({ requestedRole: "faculty" });
     await approveUser(admin, { userId: target.id, role: "faculty", confirmedEmailOwner: false });
 
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({
       actorId: admin.id,
@@ -95,7 +103,7 @@ describe("approveUser()", () => {
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.code).toBe("email_unconfirmed");
     expect((await reload(target.id)).status).toBe("pending");
-    expect(await testDb.select().from(auditLogs)).toHaveLength(0);
+    expect(await auditAbout(target.id)).toHaveLength(0);
 
     const allowed = await approveUser(admin, {
       userId: target.id,
@@ -103,7 +111,7 @@ describe("approveUser()", () => {
       confirmedEmailOwner: true,
     });
     expect(allowed.ok).toBe(true);
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit[0].details).toMatchObject({ emailVerified: false, confirmedEmailOwner: true });
   });
 
@@ -161,7 +169,7 @@ describe("approveUser()", () => {
     const second = await approveUser(admin, input);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
-    expect(await testDb.select().from(auditLogs)).toHaveLength(1);
+    expect(await auditAbout(target.id)).toHaveLength(1);
   });
 
   it("rolls the approval back if the audit row cannot be written (same transaction)", async () => {
@@ -191,7 +199,7 @@ describe("rejectUser()", () => {
     expect(after.rejectionReason).toBe("Not a student here");
     expect(after.roleId).toBeNull();
 
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ action: "user.rejected", targetId: target.id });
   });
@@ -251,7 +259,7 @@ describe("reapproveUser() (an account rejected by mistake)", () => {
     const target = await rejectedUser({ rejectionReason: "Wrong email domain" });
     await reapproveUser(admin, { userId: target.id, role: "student", confirmedEmailOwner: false });
 
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({
       actorId: admin.id,
@@ -331,7 +339,7 @@ describe("reapproveUser() (an account rejected by mistake)", () => {
     const second = await reapproveUser(admin, input);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
-    expect(await testDb.select().from(auditLogs)).toHaveLength(1);
+    expect(await auditAbout(target.id)).toHaveLength(1);
   });
 
   it("rolls back if the audit row cannot be written (same transaction)", async () => {
@@ -360,7 +368,7 @@ describe("reapproveUser() (an account rejected by mistake)", () => {
       confirmedEmailOwner: true,
     });
     expect(right.ok).toBe(true);
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit.map((row) => row.action)).toEqual(["user.approved"]);
   });
 });
@@ -376,7 +384,7 @@ describe("resetRejectedToPending()", () => {
     expect(after.rejectionReason).toBeNull();
     expect(after.roleId).toBeNull();
 
-    const audit = await testDb.select().from(auditLogs);
+    const audit = await auditAbout(target.id);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ action: "user.reset_to_pending", targetId: target.id });
     expect(audit[0].details).toMatchObject({ previousRejectionReason: "Mistake" });

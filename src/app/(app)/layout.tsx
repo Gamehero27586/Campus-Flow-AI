@@ -10,6 +10,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const navItems: NavItem[] = [
     ...(permissions.has("dashboard.view") ? [{ href: "/dashboard", label: "Dashboard" }] : []),
     ...(permissions.has("admin.users.manage") ? [{ href: "/admin/users", label: "Users" }] : []),
+    ...(permissions.has("admin.roles.edit_permissions")
+      ? [{ href: "/admin/roles", label: "Roles" }]
+      : []),
   ];
 
   return (

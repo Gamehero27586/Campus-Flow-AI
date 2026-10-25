@@ -7,6 +7,11 @@ import {
   evaluateAuthorization,
   type RequiredPermissions,
 } from "@/server/policies/evaluate";
+import {
+  evaluateRecordAuthorization,
+  type RecordRules,
+  type RecordScope,
+} from "@/server/policies/evaluate-record";
 
 /**
  * For server actions and route handlers: returns the decision and lets the caller reply.
@@ -16,6 +21,20 @@ export async function authorize(required: RequiredPermissions = null): Promise<A
   const user = await getCurrentUser();
   const permissions = user ? await loadPermissionKeys(user.roleId) : new Set<string>();
   return evaluateAuthorization(user, permissions, required);
+}
+
+/**
+ * The full five-step check for an action on one record. `loadRecord` runs only after steps 1 to 3
+ * pass and must scope the query to the user. `rules` are the domain's relationship and state rules.
+ */
+export async function authorizeRecord<TRecord>(args: {
+  required: RequiredPermissions;
+  loadRecord: (scope: RecordScope) => Promise<TRecord | null>;
+  rules: RecordRules<TRecord>;
+}) {
+  const user = await getCurrentUser();
+  const permissions = user ? await loadPermissionKeys(user.roleId) : new Set<string>();
+  return evaluateRecordAuthorization({ user, permissions, ...args });
 }
 
 /**

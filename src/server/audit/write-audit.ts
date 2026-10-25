@@ -1,4 +1,5 @@
 import "server-only";
+import type { AuditAction } from "@/server/audit/audit-actions";
 import { db } from "@/server/db/client";
 import { auditLogs } from "@/server/db/schema";
 
@@ -7,7 +8,7 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type AuditEntry = {
   actorId: string;
-  action: string;
+  action: AuditAction;
   targetType: string;
   targetId?: string;
   details?: Record<string, unknown>;

@@ -28,7 +28,9 @@ A final-year project: a Next.js web app where students, faculty and an admin man
 
 Next.js 16 App Router (`src/`), TypeScript strict, PostgreSQL (Neon, local fallback) via Drizzle with the **`pg` driver** (never `neon-http`), Better Auth, Tailwind and shadcn/ui, Zod, react-hook-form, Vitest and Playwright. Package manager: **npm**.
 
-Scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `format`, `test`, `test:e2e`, `db:generate`, `db:migrate`, `db:studio`, `seed:base`, `admin:promote -- <email>`, and, added with the slice that needs them, `seed:demo`, `eval:ai`, `files:cleanup`.
+Scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `format`, `test`, `test:e2e`, `db:generate`, `db:migrate`, `db:studio`, `db:reset`, `seed:base`, `admin:promote -- <email>`, and, added with the slice that needs them, `seed:demo`, `eval:ai`, `files:cleanup`.
+
+**Two databases (`docs/decisions.md` §18).** `DATABASE_URL` is the **test** database while developing: its data may be wiped (`db:reset`) and its test accounts share one password whose hash was copied between accounts with SQL; **no password is ever written in the repository** (see `docs/decisions.md` §18). The **live** database is a separate Neon project whose string is kept, unused, as `DATABASE_URL_LIVE`. Never run `db:reset` against it (it refuses to). `audit_logs` is append-only (database trigger): do not write code or tests that delete audit rows, and expect an account that has acted to be undeletable.
 
 Next.js 16 ships its own documentation in `node_modules/next/dist/docs/`; read the relevant page there before using a Next.js API (`AGENTS.md` says the same).
 
@@ -63,7 +65,7 @@ Migrations: `db:generate` and `db:migrate`, committed, never edited after being 
 
 ## Tests
 
-Write tests with the code, not after. Required: a table-driven permission suite (acting user type by action by relationship by expected result), metric tests with hand-calculated fixtures and a fixed clock, a test for each status and timestamp rule, the `update-user` test from rule 5, an upload test with a file just under the cap (checksum compared), and 3 Playwright flows. Lateness is calculated, never stored; test it from `submitted_at` against the current deadline.
+Write tests with the code, not after. **Every new server action or page needs a row in `tests/permissions/coverage.test.ts` (with the key it needs) and, for an action, rows in `tests/permissions/actions-matrix.test.ts`; the guard test fails when one is missing.** Required: a table-driven permission suite (acting user type by action by relationship by expected result), metric tests with hand-calculated fixtures and a fixed clock, a test for each status and timestamp rule, the `update-user` test from rule 5, an upload test with a file just under the cap (checksum compared), and 3 Playwright flows. Lateness is calculated, never stored; test it from `submitted_at` against the current deadline.
 
 ## AI rules
 

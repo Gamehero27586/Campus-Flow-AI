@@ -1,30 +1,43 @@
 import { and, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promoteFirstAdmin } from "@/server/admin/promote-first-admin";
 import { PERMISSIONS } from "@/server/auth/permission-keys";
 import { seedBase } from "@/server/auth/seed-base";
-import { db } from "@/server/db/client";
 import { auditLogs, permissions, rolePermissions, roles, users } from "@/server/db/schema";
 import { insertUser } from "../helpers/factories";
-import type { TestDb } from "../helpers/test-db";
+import { createTestDb, type TestDb } from "../helpers/test-db";
 
-// The application's database client is replaced by an in-memory Postgres with the real migrations applied.
-vi.mock("@/server/db/client", async () => {
-  const { createTestDb } = await import("../helpers/test-db");
-  const { db } = await createTestDb();
-  return { db };
-});
+// The application's database client is replaced by an in-memory Postgres with the real migrations
+// applied. Every test gets its own fresh database: audit_logs is append-only, so a test cannot clear
+// it, and users who have acted cannot be deleted.
+const holder = vi.hoisted(() => ({ db: null as unknown }));
+vi.mock("@/server/db/client", () => ({
+  get db() {
+    return holder.db;
+  },
+}));
 
-const testDb = db as unknown as TestDb;
+let closeDb: (() => Promise<void>) | null = null;
 
-async function resetData() {
-  await testDb.delete(auditLogs);
-  await testDb.delete(users);
-  await testDb.delete(rolePermissions);
-  await testDb.delete(permissions);
-  await testDb.delete(roles);
+async function freshDatabase() {
+  const test = await createTestDb();
+  holder.db = test.db;
+  closeDb = () => test.client.close();
 }
 
+afterEach(async () => {
+  await closeDb?.();
+  closeDb = null;
+});
+
+// testDb always points at the current test's database.
+const testDb = new Proxy({} as TestDb, {
+  get: (_target, property) => {
+    const real = holder.db as TestDb;
+    const value = Reflect.get(real, property, real);
+    return typeof value === "function" ? value.bind(real) : value;
+  },
+});
 async function grantsByRole() {
   const rows = await testDb
     .select({ role: roles.key, permission: permissions.key })
@@ -37,7 +50,7 @@ async function grantsByRole() {
 }
 
 describe("seedBase()", () => {
-  beforeEach(resetData);
+  beforeEach(freshDatabase);
 
   it("writes 3 roles, 23 keys and exactly the default grants", async () => {
     const result = await seedBase();
@@ -92,7 +105,7 @@ describe("seedBase()", () => {
 });
 
 describe("promoteFirstAdmin() (npm run admin:promote)", () => {
-  beforeEach(resetData);
+  beforeEach(freshDatabase);
 
   it("refuses when the roles are not seeded", async () => {
     await insertUser(testDb, { email: "owner@example.com" });

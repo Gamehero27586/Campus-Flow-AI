@@ -9,7 +9,18 @@ import {
   rejectUser,
   resetRejectedToPending,
 } from "@/server/admin/commands";
-import { authorize } from "@/server/policies/authorize";
+import { activationRules, rejectionRules, resetToPendingRules } from "@/server/admin/policy";
+import { loadUserForAdmin } from "@/server/admin/queries";
+import { authorizeRecord } from "@/server/policies/authorize";
+import { failureFor } from "@/server/policies/evaluate-record";
+
+// Every action here has the same shape (docs/folder-structure.md §4): parse with Zod, run the full
+// five-step check on the target account with authorizeRecord(), call ONE command, revalidate, return
+// the result. The rules are in src/server/admin/policy.ts.
+
+// Approving and reapproving set a role, so they need both keys (docs/data-flows.md §6).
+// Rejecting and moving back to pending set no role, so they need only the first.
+const APPROVE_KEYS = ["admin.users.manage", "admin.users.assign_role"] as const;
 
 const resetSchema = z.object({ userId: z.uuid() });
 
@@ -40,9 +51,12 @@ export async function approveUserAction(
     return fail("invalid_input", "Choose a role.", z.flattenError(parsed.error).fieldErrors);
   }
 
-  // Approving sets a role, so it needs both keys (docs/data-flows.md §6). Rejecting needs only the first.
-  const authorization = await authorize(["admin.users.manage", "admin.users.assign_role"]);
-  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+  const authorization = await authorizeRecord({
+    required: APPROVE_KEYS,
+    loadRecord: (scope) => loadUserForAdmin(scope, parsed.data.userId),
+    rules: activationRules(parsed.data, "approve"),
+  });
+  if (!authorization.ok) return failureFor(authorization);
 
   const result = await approveUser(authorization.user, parsed.data);
   if (!result.ok) return result;
@@ -65,8 +79,12 @@ export async function reapproveUserAction(
     return fail("invalid_input", "Choose a role.", z.flattenError(parsed.error).fieldErrors);
   }
 
-  const authorization = await authorize(["admin.users.manage", "admin.users.assign_role"]);
-  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+  const authorization = await authorizeRecord({
+    required: APPROVE_KEYS,
+    loadRecord: (scope) => loadUserForAdmin(scope, parsed.data.userId),
+    rules: activationRules(parsed.data, "reapprove"),
+  });
+  if (!authorization.ok) return failureFor(authorization);
 
   const result = await reapproveUser(authorization.user, parsed.data);
   if (!result.ok) return result;
@@ -83,8 +101,12 @@ export async function resetToPendingAction(
   const parsed = resetSchema.safeParse({ userId: formData.get("userId") });
   if (!parsed.success) return fail("invalid_input", "That account was not recognised.");
 
-  const authorization = await authorize("admin.users.manage");
-  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+  const authorization = await authorizeRecord({
+    required: "admin.users.manage",
+    loadRecord: (scope) => loadUserForAdmin(scope, parsed.data.userId),
+    rules: resetToPendingRules(),
+  });
+  if (!authorization.ok) return failureFor(authorization);
 
   const result = await resetRejectedToPending(authorization.user, parsed.data);
   if (!result.ok) return result;
@@ -105,8 +127,12 @@ export async function rejectUserAction(
     return fail("invalid_input", "Check the reason.", z.flattenError(parsed.error).fieldErrors);
   }
 
-  const authorization = await authorize("admin.users.manage");
-  if (!authorization.ok) return fail("not_allowed", "You cannot do that.");
+  const authorization = await authorizeRecord({
+    required: "admin.users.manage",
+    loadRecord: (scope) => loadUserForAdmin(scope, parsed.data.userId),
+    rules: rejectionRules(),
+  });
+  if (!authorization.ok) return failureFor(authorization);
 
   const result = await rejectUser(authorization.user, parsed.data);
   if (!result.ok) return result;

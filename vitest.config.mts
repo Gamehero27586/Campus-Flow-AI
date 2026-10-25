@@ -11,7 +11,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "tests/unit/**/*.test.ts",
+      "tests/integration/**/*.test.ts",
+      "tests/permissions/**/*.test.ts",
+    ],
     env: {
       // A harmless value so src/env.ts validates. Tests never connect to this.
       DATABASE_URL: "postgres://test:test@127.0.0.1:5432/test",

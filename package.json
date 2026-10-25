@@ -10,12 +10,13 @@
     "typecheck": "next typegen && tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio",
+    "studio": "drizzle-kit studio",
     "seed:base": "tsx --conditions=react-server scripts/seed-base.ts",
-    "admin:promote": "tsx --conditions=react-server scripts/admin-promote.ts"
+    "admin:promote": "tsx --conditions=react-server scripts/admin-promote.ts",
+    "db:reset": "tsx --conditions=react-server scripts/db-reset.ts"
   },
   "engines": {
     "node": ">=24"
