@@ -4,7 +4,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FormState } from "@/lib/result";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { seedBase } from "@/server/auth/seed-base";
-import { auditLogs, permissions, rolePermissions, roles, users } from "@/server/db/schema";
+import {
+  auditLogs,
+  permissions,
+  rolePermissions,
+  roles,
+  taskEvents,
+  tasks,
+  users,
+} from "@/server/db/schema";
 import { asCurrentUser, insertUser } from "../helpers/factories";
 import { createTestDb, type TestDb } from "../helpers/test-db";
 
@@ -56,6 +64,7 @@ mocks.db = db;
 const admin = await import("@/app/(app)/admin/users/actions");
 const settings = await import("@/app/(app)/settings/actions");
 const welcome = await import("@/app/(onboarding)/welcome/actions");
+const taskActions = await import("@/app/(app)/tasks/actions");
 
 let roleIds: Record<string, string>;
 
@@ -81,7 +90,8 @@ type ActorKind =
   | "faculty"
   | "admin"
   | "admin without assign_role"
-  | "student with stray admin grants";
+  | "student with stray admin grants"
+  | "faculty with personal tasks on";
 
 type Setup = { user: CurrentUser | null; restore: () => Promise<void> };
 
@@ -148,6 +158,25 @@ async function actAs(kind: ActorKind): Promise<Setup> {
       setup = {
         user: await make("active", "admin"),
         restore: async () => void (await db.insert(rolePermissions).values(grant)),
+      };
+      break;
+    }
+    case "faculty with personal tasks on": {
+      // Personal tasks are off for Faculty by default; an Admin may switch them on (the key is eligible).
+      const grant = await grantRow("faculty", "task.personal.manage");
+      await db.insert(rolePermissions).values(grant);
+      setup = {
+        user: await make("active", "faculty"),
+        restore: async () => {
+          await db
+            .delete(rolePermissions)
+            .where(
+              and(
+                eq(rolePermissions.roleId, grant.roleId),
+                eq(rolePermissions.permissionId, grant.permissionId),
+              ),
+            );
+        },
       };
       break;
     }
@@ -235,7 +264,7 @@ type AdminAction = {
 };
 
 const call = (
-  action: (state: FormState, data: FormData) => Promise<FormState>,
+  action: (state: null, data: FormData) => Promise<FormState>,
   fields: Record<string, string>,
 ) => outcome(() => action(null, form(fields)));
 
@@ -511,17 +540,21 @@ describe("updateTimezoneAction changes only the signed-in user's own account", (
     }
   });
 
-  it("refuses a made-up time zone before anything is saved", async () => {
-    const setup = await actAs("student");
-    try {
-      expect(await call(settings.updateTimezoneAction, { timezone: "Mars/Olympus_Mons" })).toBe(
-        "fail:invalid_input",
-      );
-      expect((await reload(setup.user!.id)).timezone).toBe("Asia/Kolkata");
-    } finally {
-      await setup.restore();
-    }
-  });
+  // Bare offsets mean opposite things in Node and PostgreSQL: for "+05:30", Node's Intl reads 5.5 hours EAST
+  // of UTC but PostgreSQL's AT TIME ZONE reads 5.5 hours WEST (so 12:00 local on 2 Nov would be 17:30 UTC
+  // instead of 06:30 UTC, 11 hours out). Only IANA names are accepted.
+  it.each(["Mars/Olympus_Mons", "+05:30", "-03:00", "+0530"])(
+    "refuses %s before anything is saved",
+    async (timezone) => {
+      const setup = await actAs("student");
+      try {
+        expect(await call(settings.updateTimezoneAction, { timezone })).toBe("fail:invalid_input");
+        expect((await reload(setup.user!.id)).timezone).toBe("Asia/Kolkata");
+      } finally {
+        await setup.restore();
+      }
+    },
+  );
 });
 
 // --- Welcome: for accounts that are not active yet, so it uses the gate, not a permission key ------
@@ -545,6 +578,402 @@ describe("completeWelcomeAction", () => {
     const setup = await actAs(kind);
     try {
       expect(await run()).toBe(expected);
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+// --- Personal tasks (Slice 3) ---------------------------------------------------------------------
+// Personal tasks are tier 1 data: only the owner may read or change one. Every action is run as every kind
+// of actor against (a) the actor's OWN task, which is in the right state for the action, and (b) a task
+// that belongs to another student. A refused request must change nothing and write no event.
+
+const TASK_ACTORS: ActorKind[] = [...ALL_ACTORS, "faculty with personal tasks on"];
+/** The only actors who hold task.personal.manage: Student by default, Faculty once an Admin turns it on. */
+const TASK_OWNERS: ActorKind[] = [
+  "student",
+  "student with stray admin grants", // still a Student: the stray grants add nothing and take nothing
+  "faculty with personal tasks on",
+];
+
+const LONG_AGO = new Date("2026-01-01T00:00:00Z");
+
+async function insertTask(ownerId: string, overrides: Partial<typeof tasks.$inferInsert> = {}) {
+  const [row] = await db
+    .insert(tasks)
+    .values({
+      context: "personal",
+      createdBy: ownerId,
+      assigneeId: ownerId,
+      title: "Read chapter 4",
+      category: "study",
+      createdAt: LONG_AGO,
+      updatedAt: LONG_AGO,
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
+async function taskSnapshot(id: string) {
+  const [row] = await db.select().from(tasks).where(eq(tasks.id, id));
+  const events = await db.select().from(taskEvents).where(eq(taskEvents.taskId, id));
+  return { row, events: events.length };
+}
+
+type TaskAction = {
+  name: string;
+  /** Creates what the action needs for this owner, in the right state, and returns the id to send. */
+  fixture: (ownerId: string) => Promise<string>;
+  run: (taskId: string) => Promise<string>;
+};
+
+const TASK_ACTIONS: TaskAction[] = [
+  {
+    name: "startTaskAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) => call(taskActions.startTaskAction, { taskId: id }),
+  },
+  {
+    name: "moveBackToTodoAction",
+    fixture: async (owner) =>
+      (await insertTask(owner, { status: "in_progress", startedAt: LONG_AGO })).id,
+    run: (id) => call(taskActions.moveBackToTodoAction, { taskId: id }),
+  },
+  {
+    name: "completeTaskAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) => call(taskActions.completeTaskAction, { taskId: id }),
+  },
+  {
+    name: "reopenTaskAction",
+    fixture: async (owner) =>
+      (
+        await insertTask(owner, {
+          status: "done",
+          startedAt: LONG_AGO,
+          completedAt: new Date("2026-01-05T00:00:00Z"),
+        })
+      ).id,
+    run: (id) => call(taskActions.reopenTaskAction, { taskId: id, to: "todo" }),
+  },
+  {
+    name: "backfillStartAction",
+    fixture: async (owner) =>
+      (await insertTask(owner, { status: "done", completedAt: new Date("2026-01-05T00:00:00Z") })).id,
+    run: (id) =>
+      call(taskActions.backfillStartAction, {
+        taskId: id,
+        startDate: "2026-01-03",
+        startTime: "10:00",
+      }),
+  },
+  {
+    name: "changeDeadlineAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) =>
+      call(taskActions.changeDeadlineAction, {
+        taskId: id,
+        deadlineDate: "2026-12-01",
+        deadlineTime: "",
+      }),
+  },
+  {
+    name: "updateTaskAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) =>
+      call(taskActions.updateTaskAction, {
+        taskId: id,
+        title: "Renamed",
+        description: "",
+        category: "reading",
+        categoryOther: "",
+        priority: "high",
+        estimateMinutes: "",
+      }),
+  },
+  {
+    name: "updateSubtaskAction",
+    fixture: async (owner) => {
+      const parent = await insertTask(owner);
+      return (await insertTask(owner, { parentTaskId: parent.id, title: "A step" })).id;
+    },
+    run: (id) =>
+      call(taskActions.updateSubtaskAction, {
+        taskId: id,
+        title: "Renamed step",
+        estimateMinutes: "",
+      }),
+  },
+  {
+    name: "createSubtaskAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) => call(taskActions.createSubtaskAction, { taskId: id, title: "New step" }),
+  },
+  {
+    name: "deleteTaskAction",
+    fixture: async (owner) => (await insertTask(owner)).id,
+    run: (id) => call(taskActions.deleteTaskAction, { taskId: id }),
+  },
+  {
+    name: "restoreTaskAction",
+    fixture: async (owner) =>
+      (
+        await insertTask(owner, {
+          deletedAt: new Date("2026-01-02T00:00:00Z"),
+          deletedReason: "user_deleted",
+        })
+      ).id,
+    run: (id) => call(taskActions.restoreTaskAction, { taskId: id }),
+  },
+];
+
+describe.each(TASK_ACTIONS)("$name", (action) => {
+  it.each(TASK_ACTORS)("as %s, on their own task", async (kind) => {
+    const setup = await actAs(kind);
+    try {
+      const id = await action.fixture(setup.user?.id ?? (await insertUser(db)).id);
+      const before = await taskSnapshot(id);
+      const mayDoIt = TASK_OWNERS.includes(kind);
+
+      expect(await action.run(id)).toBe(mayDoIt ? "ok" : NOT_ALLOWED);
+
+      const after = await taskSnapshot(id);
+      if (mayDoIt) {
+        // createSubtask changes the parent's steps, not its own row, so look at the whole task tree.
+        const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, id));
+        expect(after.row !== before.row && (JSON.stringify(after.row) !== JSON.stringify(before.row) || steps.length > 0)).toBe(true);
+      } else {
+        // A refused request changed nothing and left no event.
+        expect(after).toEqual(before);
+      }
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it.each(TASK_ACTORS)("as %s, on another student's task", async (kind) => {
+    const setup = await actAs(kind);
+    try {
+      const stranger = await insertUser(db, { status: "active" });
+      const id = await action.fixture(stranger.id);
+      const before = await taskSnapshot(id);
+
+      const result = await action.run(id);
+
+      // Someone who holds the key is told "not found" (the task does not exist for them); everyone else
+      // is stopped earlier, by the key, and cannot tell whether the id exists.
+      expect(result).toBe(TASK_OWNERS.includes(kind) ? "fail:not_found" : NOT_ALLOWED);
+      expect(await taskSnapshot(id)).toEqual(before);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as a student: an id that does not exist is 'not found'", async () => {
+    const setup = await actAs("student");
+    try {
+      expect(await action.run(randomUUID())).toBe("fail:not_found");
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as admin: an id that does not exist gives the same answer as any other refusal", async () => {
+    const setup = await actAs("admin");
+    try {
+      expect(await action.run(randomUUID())).toBe(NOT_ALLOWED);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as a student: a bad id is rejected as invalid input", async () => {
+    const setup = await actAs("student");
+    try {
+      expect(await action.run("not-a-uuid")).toBe("fail:invalid_input");
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+describe("tier 1: Admin and Faculty never reach a student's personal task", () => {
+  it("Admin is refused by every task action on a student's task, and nothing changes", async () => {
+    const student = await insertUser(db, { status: "active" });
+    const setup = await actAs("admin");
+    try {
+      for (const action of TASK_ACTIONS) {
+        const id = await action.fixture(student.id);
+        const before = await taskSnapshot(id);
+        expect(await action.run(id), action.name).toBe(NOT_ALLOWED);
+        expect(await taskSnapshot(id), action.name).toEqual(before);
+      }
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("Faculty with personal tasks on can use only their own: a student's task is 'not found'", async () => {
+    const student = await insertUser(db, { status: "active" });
+    const setup = await actAs("faculty with personal tasks on");
+    try {
+      const id = (await insertTask(student.id)).id;
+      expect(await call(taskActions.deleteTaskAction, { taskId: id })).toBe("fail:not_found");
+      expect((await taskSnapshot(id)).row.deletedAt).toBeNull();
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("an assignment task of the actor's own is not a personal task: 'not found'", async () => {
+    const teacher = await insertUser(db, { status: "active" });
+    const setup = await actAs("student");
+    try {
+      const [assignmentTask] = await db
+        .insert(tasks)
+        .values({
+          context: "assignment",
+          createdBy: teacher.id,
+          assigneeId: setup.user!.id,
+          assignmentId: randomUUID(),
+          title: "Lab report",
+          category: "assignment",
+          createdAt: LONG_AGO,
+          updatedAt: LONG_AGO,
+        })
+        .returning();
+      expect(await call(taskActions.completeTaskAction, { taskId: assignmentTask.id })).toBe(
+        "fail:not_found",
+      );
+      expect((await taskSnapshot(assignmentTask.id)).row.status).toBe("todo");
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+describe("createTaskAction", () => {
+  const fields = { title: "Plan the report", category: "study", priority: "" };
+
+  it.each(TASK_ACTORS)("as %s", async (kind) => {
+    const setup = await actAs(kind);
+    try {
+      const mayDoIt = TASK_OWNERS.includes(kind);
+      const owner = setup.user?.id;
+      const countBefore = owner
+        ? (await db.select().from(tasks).where(eq(tasks.createdBy, owner))).length
+        : 0;
+
+      expect(await call(taskActions.createTaskAction, fields)).toBe(mayDoIt ? "ok" : NOT_ALLOWED);
+
+      if (owner) {
+        const mine = await db.select().from(tasks).where(eq(tasks.createdBy, owner));
+        expect(mine).toHaveLength(countBefore + (mayDoIt ? 1 : 0));
+        if (mayDoIt) {
+          expect(mine[0]).toMatchObject({
+            context: "personal",
+            assigneeId: owner,
+            title: "Plan the report",
+          });
+        }
+      }
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("returns the new task's id and creates the steps with it", async () => {
+    const setup = await actAs("student");
+    try {
+      const data = new FormData();
+      data.set("title", "Plan the report");
+      data.set("category", "study");
+      data.append("steps", "Outline");
+      data.append("steps", "");
+      data.append("steps", "Draft");
+      const result = await taskActions.createTaskAction(null, data);
+      expect(result?.ok).toBe(true);
+      const taskId = (result as { data: { taskId: string } }).data.taskId;
+      const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, taskId));
+      expect(steps.map((s) => s.title).sort()).toEqual(["Draft", "Outline"]);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("refuses bad input with field messages and creates nothing", async () => {
+    const setup = await actAs("student");
+    try {
+      const bad: Array<Record<string, string>> = [
+        { ...fields, title: "   " },
+        { ...fields, category: "other" },
+        { ...fields, deadlineDate: "20266-01-01" },
+        { ...fields, deadlineTime: "10:00" },
+        { ...fields, estimateMinutes: "6001" },
+      ];
+      for (const input of bad) {
+        expect(await call(taskActions.createTaskAction, input), JSON.stringify(input)).toBe(
+          "fail:invalid_input",
+        );
+      }
+      expect(
+        await db.select().from(tasks).where(eq(tasks.createdBy, setup.user!.id)),
+      ).toHaveLength(0);
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+describe("task actions: the record rules, as the owner", () => {
+  it("completing a task with open steps asks for the choice, then 'complete all' finishes them", async () => {
+    const setup = await actAs("student");
+    try {
+      const parent = await insertTask(setup.user!.id);
+      await insertTask(setup.user!.id, { parentTaskId: parent.id, title: "Step" });
+      expect(await call(taskActions.completeTaskAction, { taskId: parent.id })).toBe(
+        "fail:open_steps",
+      );
+      expect(
+        await call(taskActions.completeTaskAction, { taskId: parent.id, completeAllSteps: "on" }),
+      ).toBe("ok");
+      const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, parent.id));
+      expect(steps.every((s) => s.status === "done")).toBe(true);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("a deleted task is refused every action but restore", async () => {
+    const setup = await actAs("student");
+    try {
+      const task = await insertTask(setup.user!.id, {
+        deletedAt: new Date("2026-01-02T00:00:00Z"),
+        deletedReason: "user_deleted",
+      });
+      expect(await call(taskActions.startTaskAction, { taskId: task.id })).toBe("fail:task_deleted");
+      expect(await call(taskActions.deleteTaskAction, { taskId: task.id })).toBe(
+        "fail:already_deleted",
+      );
+      expect(await call(taskActions.restoreTaskAction, { taskId: task.id })).toBe("ok");
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("delete then restore round-trips, and a step of a deleted parent says 'restore the task first'", async () => {
+    const setup = await actAs("student");
+    try {
+      const parent = await insertTask(setup.user!.id);
+      const step = await insertTask(setup.user!.id, { parentTaskId: parent.id, title: "Step" });
+      expect(await call(taskActions.deleteTaskAction, { taskId: parent.id })).toBe("ok");
+      expect(await call(taskActions.restoreTaskAction, { taskId: step.id })).toBe(
+        "fail:parent_deleted",
+      );
+      expect(await call(taskActions.restoreTaskAction, { taskId: parent.id })).toBe("ok");
+      expect((await taskSnapshot(step.id)).row.deletedAt).toBeNull();
     } finally {
       await setup.restore();
     }

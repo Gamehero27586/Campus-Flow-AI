@@ -23,5 +23,8 @@ export function fail(
   return { ok: false, error: { code, message }, ...(fieldErrors ? { fieldErrors } : {}) };
 }
 
-/** What a form keeps between submissions of a server action (null before the first submit). */
-export type FormState = { ok: true; message?: string } | Failure | null;
+/**
+ * What a form keeps between submissions of a server action (null before the first submit).
+ * `data` carries a small plain answer when the screen needs one (for example the id of a new task).
+ */
+export type FormState<TData = unknown> = { ok: true; message?: string; data?: TData } | Failure | null;

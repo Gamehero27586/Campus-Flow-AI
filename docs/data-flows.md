@@ -37,8 +37,16 @@ All task changes go through `server/tasks/commands.ts`.
 | Reassign (team task) | Any active member, to an active member | `assignee_id` changed; event `reassigned` |
 | Delete | Personal tasks: owner. Team tasks: any active member | Soft delete, `deleted_reason = user_deleted`; event. Students cannot delete assignment tasks |
 | Subtask created or completed | Assignee | One level only; copies the parent's context, assignee, assignment and team. Completing all subtasks does **not** auto-complete the parent |
+| Subtask started while the parent is To Do (R-a) | Assignee | The parent also moves to In progress and gets `started_at` if empty (never overwritten), at the same moment, with its own `status_changed` event |
+| Subtask added to a Done parent (R-b) | Assignee | Refused: "Reopen the task to add steps". At most 30 steps per task (not counting deleted ones) |
+| Subtask reopened while the parent is Done (R-c) | Assignee | Refused: "Reopen the task first" |
+| Subtask category and priority (R-d) | Assignee | Copied from the parent; when the parent's change, every subtask follows (deleted ones too). A subtask has a title, status, optional deadline and estimate |
+| Parent deleted (R-f) | Personal: owner | Its non-deleted subtasks are soft-deleted with it: same `deleted_at` and reason, one `deleted` event each |
+| Restore (R-g, R-h) | Personal: owner | Clears `deleted_at` and `deleted_reason`; event `restored`. A parent also restores the subtasks whose `deleted_at` equals its own, not ones deleted earlier on their own. A subtask whose parent is still deleted is refused ("Restore the task first"), and so is a not-done subtask whose parent is Done ("Reopen the task first"). The task then counts normally in metrics (section 7.1 looks only at the current deletion state) |
 
 Edge cases to test: done, reopened, done again (`completed_at` is the latest, `started_at` the first); completing a parent with open subtasks without confirmation (refused); moving a deadline earlier (no increment); a teammate changing the status of someone else's task (refused); a "When did you start?" answer after `completed_at` or before `created_at` (refused); two tabs changing the same task (the second change is checked against the current status, not the page's copy).
+
+More edge cases for personal tasks (Slice 3, all tested): reopening to In progress a task that was never started gives it a start now; a deadline cannot be removed, only moved; moving a deadline to the same instant writes no event; completing a parent whose only open step is deleted is allowed; starting a step when the parent is already In progress leaves the parent alone; deleting a step on its own, then its parent, then restoring the parent leaves that step deleted; every action on a deleted task is refused until it is restored.
 
 ## 3. Posting and managing an assignment
 

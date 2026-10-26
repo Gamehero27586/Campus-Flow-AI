@@ -41,6 +41,21 @@ const ACTIONS: Record<string, Record<string, ActionSpec>> = {
     rejectUserAction: { check: "authorizeRecord", keys: ["admin.users.manage"] },
     resetToPendingAction: { check: "authorizeRecord", keys: ["admin.users.manage"] },
   },
+  // Personal tasks (tier 1): one key, task.personal.manage. Creating has no record yet, so it uses authorize().
+  "app/(app)/tasks/actions.ts": {
+    createTaskAction: { check: "authorize", keys: ["task.personal.manage"] },
+    createSubtaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    updateTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    updateSubtaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    changeDeadlineAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    startTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    moveBackToTodoAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    completeTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    reopenTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    backfillStartAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    deleteTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+    restoreTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
+  },
   "app/(app)/settings/actions.ts": {
     updateTimezoneAction: { check: "authorize", keys: [] }, // any active account
     changePasswordAction: { check: "authorize", keys: [] },

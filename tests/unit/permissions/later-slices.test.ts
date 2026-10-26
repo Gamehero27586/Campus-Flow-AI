@@ -4,10 +4,11 @@ import { describe, it } from "vitest";
 // visible TODO in the test output; the slice that builds the table writes the real test in its own
 // policy test file and deletes the line here. Nothing about permissions is silently untested.
 
-describe.skip("Slice 3: personal tasks (tier 1)", () => {
-  it.todo("Admin reads a student's personal task: denied (not found)");
-  it.todo("Admin reads the subtasks of an assignment task: denied (not found)");
-  it.todo("Faculty reads a student's personal task or Growth Tracker: denied");
+// Slice 3 (personal tasks) is built: its permission cases are real tests now, in
+// tests/integration/tasks-queries.test.ts, tests/unit/tasks/policy.test.ts and tests/permissions/actions-matrix.test.ts.
+
+describe.skip("Slice 5: Growth Tracker (tier 1)", () => {
+  it.todo("Faculty or Admin reads a student's Growth Tracker: denied (the personal-task half is tested in Slice 3)");
 });
 
 describe.skip("Slice 6: classes and rosters", () => {

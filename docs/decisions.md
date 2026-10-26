@@ -228,8 +228,45 @@ Choices Opus made where the owner had not answered; the owner may change any of 
 
 **Not in this slice:** real relationship and state rules for tasks, classes, assignments, files and teams (their slices); editing the permission grid, role changes, deactivation and the audit viewer (Slice 10). **The security review in a separate session is due now** (CLAUDE.md: end of Slices 1, 2 and 7).
 
-## 19. Still open
+## 19. Slice 3 notes (personal tasks; 3a to 3c built 26 Oct 2026)
 
-1. **D4:** should secondary buttons stay coral (with dark text), or become teal outline with coral kept as the accent? Decide before Slice 3, when the first real screens are built.
-2. The wireframes do not yet show the requested-role field, the "When did you start?" prompt, the email-verified badge or the reset-link action. The documents decide; update the canvas when convenient.
-3. Later features: direct add of a student by username, team join codes, calendar sync, email sending, Cloudinary, per-student deadline extensions, CSV import.
+**The owner's three decisions (26 Oct 2026).**
+1. **Secondary buttons are teal outline** (D4 closed): brand teal text and border, transparent fill, in both themes. Coral stays the 10% accent for one signature action, the "Break this down" AI button in Slice 4. (`color-palette.md` §4 is updated with the first screens, 3d.)
+2. **A deadline is a date with an optional time.** With no time, the task is due at **23:59 on that day in the user's time zone** (`users.timezone`). Stored as UTC `timestamptz`.
+3. **Deleting has two ways back:** an **Undo** button in the toast right after deleting, and a **Deleted** list from which any deleted personal task can be restored later. There is no permanent delete.
+
+**Rules R-a to R-i, confirmed by the owner on 26 Oct 2026 exactly as proposed** (`docs/slices/slice-3-plan.md` §3; the status and delete rules are also in `data-flows.md` §2):
+- **R-a** Starting a step while its parent is To Do also starts the parent (`started_at` if empty, its own `status_changed` event).
+- **R-b** No new steps on a Done parent ("Reopen the task to add steps").
+- **R-c** No reopening a step of a Done parent ("Reopen the task first").
+- **R-d** A step has a title, status, optional deadline and optional estimate. Category and priority are copied from the parent and follow it (every step, deleted ones too).
+- **R-e** A step deadline after the parent's is allowed, with a warning on the form (screen only).
+- **R-f** Deleting a parent soft-deletes its steps with it (same `deleted_at` and reason, one `deleted` event each).
+- **R-g** Restoring a parent restores the steps deleted at the same moment (equal `deleted_at`) only. Restoring a step whose parent is still deleted is refused ("Restore the task first").
+- **R-h** Restoring clears `deleted_at` and `deleted_reason` and writes a `restored` event; the task then counts normally in metrics.
+- **R-i** Limits, all in `src/config/limits.ts`: title 1 to 200 characters, description up to 5,000, custom category label 1 to 40, estimate 1 to 6,000 minutes, at most 30 steps per task. The estimate range is also written into a database CHECK, so changing it later needs a migration as well.
+
+**Small rules the code needed that the documents did not state** (built conservatively; say if any should change):
+- A step that is **not done cannot be restored into a Done parent** (same reason as R-b and R-c: a Done parent must have every step done). Reopen the parent first.
+- A **deadline can be moved, never removed.** Removing it would take a late task out of the metrics ("tasks without a deadline are never in the due set"). Moving it later still counts as a reschedule.
+- **Reopen** goes to In progress by default (or To Do if chosen). Reopening to In progress a task that never had a start gives it a start now, because that is the first time its status is In progress. `completed_at` is cleared and an existing `started_at` is kept.
+- **"When did you start?"** (`backfillStart`) works only on a Done task with no start, and the start must be between `created_at` and `completed_at`. A step never asks it.
+- **Done tasks stay editable** (title, category, deadline). Changing the deadline of a Done task changes whether it counts as on time, because on-time uses the current deadline (`data-model.md` §4 rule 3); `reschedule_count` and `original_deadline` keep the trail. **Open question for the owner:** should a Done task's deadline be locked? Not locked for now.
+- An action on a **deleted** task is refused with "This task is deleted. Restore it first." (the owner can already see it in the Deleted list, so it is a state refusal, not "not found").
+- A step cannot have its own steps (one level only).
+
+**Time (3b).** The form's local date and time become a UTC instant in **PostgreSQL** (`(date + time) AT TIME ZONE zone`, `src/server/tasks/time.ts`), which knows daylight saving; no date library and no hand-written offset arithmetic. A local time that does not exist (the clocks jump forward) or happens twice (they go back) is resolved by PostgreSQL's rules; the tests record what they are (London, 29 March and 25 October 2026). Display uses `Intl.DateTimeFormat` with the user's zone (`formatDeadline`, `isOverdue` in `src/lib/time.ts`); the time is always shown, so a date-only deadline visibly says 23:59.
+
+**Bare UTC offsets are refused as time zones.** Node's `Intl` reads `+05:30` as 5½ hours east of UTC but PostgreSQL's `AT TIME ZONE` reads the same text as 5½ hours west, so a deadline would be 11 hours out. `isValidTimeZone` (one copy, in `src/lib/time.ts`) accepts IANA names only (`Asia/Kolkata`, `Asia/Calcutta`, `UTC`, `Etc/GMT+5`) and refuses anything starting with `+` or `-`. Tested in the settings action and in `localToUtc`.
+
+**Schema (3a).** `tasks` and `task_events` are migration `0003_tasks.sql`. `assignment_id`, `team_id` and `ai_suggestion_id` are plain uuid columns **without foreign keys** because their tables do not exist yet; Slices 4, 7 and 11 add the keys in their own migrations, so the Slice 5 metric SQL is written against the final shape of `tasks`. The CHECKs: the three context shapes, done ⇔ `completed_at`, category Other ⇔ label, `deleted_at` ⇔ `deleted_reason`, `started_at <= completed_at`, `reschedule_count >= 0`, estimate range, no task is its own parent, plus the Opus review additions: `started_at` and `completed_at` not before `created_at`, estimate ⇔ estimate source, resubmission window only on assignment tasks, a deadline needs `original_deadline`, a title and a custom label are not blank, a personal task can only be deleted as `user_deleted`. `task_events` reuses the append-only trigger function from migration 0002 (UPDATE, DELETE and TRUNCATE refused). Maximum text lengths stay in Zod only. The enum value lists for category, priority and status are in `src/config/task-values.ts` so browser forms and the database share one list.
+
+**Every timestamp comes from the app clock.** Each command takes `now()` once and writes `created_at`, `updated_at` and the event's `created_at` from it (the database defaults are only a fallback), so a fixed test clock gives one consistent set of instants and "overall time" cannot come out negative.
+
+**Rules and commands (3c).** `src/server/tasks/policy.ts` has the relationship rule (my own personal task, anything else is "not found") and one state rule set per action. `commands.ts` is the only writer of `tasks` and `task_events`: one transaction per command, `SELECT ... FOR UPDATE` on the task (its parent first, so two commands cannot deadlock), the same rules run again on the locked row (so the second of two tabs is checked against the current row), then the writes and the events. Twelve server actions in `src/app/(app)/tasks/actions.ts`, one per command, all with the one key `task.personal.manage`; no key lets anyone read another person's personal task, and these files never look at an Admin permission (a test greps for it). A bug found by the tests: in a query without a join Drizzle writes a column without its table name, which made a step-count subquery compare the step with itself; the outer table is now written out as `"tasks"."id"`.
+
+## 20. Still open
+
+1. The wireframes do not yet show the requested-role field, the "When did you start?" prompt, the email-verified badge or the reset-link action. The documents decide; update the canvas when convenient.
+2. Later features: direct add of a student by username, team join codes, calendar sync, email sending, Cloudinary, per-student deadline extensions, CSV import.
+3. Should the deadline of a Done personal task be locked? (§19: not locked for now.)

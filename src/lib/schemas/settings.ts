@@ -1,14 +1,5 @@
 import { z } from "zod";
-
-/** True when the runtime knows this IANA time zone name (aliases such as Asia/Calcutta count). */
-export function isValidTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { isValidTimeZone } from "@/lib/time";
 
 export const timezoneSchema = z
   .string()
