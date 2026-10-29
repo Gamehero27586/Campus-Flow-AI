@@ -164,6 +164,9 @@ const rows: Row[] = [
   ["change deadline: open", changeDeadlineRules(), task(), "allow"],
   ["change deadline: a step", changeDeadlineRules(), step(), "allow"],
   ["change deadline: deleted", changeDeadlineRules(), task(deleted), "task_deleted"],
+  ["change deadline: in progress", changeDeadlineRules(), task({ status: "in_progress" }), "allow"],
+  ["change deadline: Done (C1)", changeDeadlineRules(), task(done), "task_done"],
+  ["change deadline: a Done step (C1)", changeDeadlineRules(), step(done), "task_done"],
 
   // ---- add a step (the record is the parent): R-b and the limit
   ["add step: To Do parent", addSubtaskRules(), task(), "allow"],

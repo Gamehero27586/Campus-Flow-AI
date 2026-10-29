@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetNowForTests, setNowForTests } from "@/lib/time";
 import type { CurrentUser } from "@/server/auth/current-user";
@@ -9,6 +9,7 @@ import {
   createSubtask,
   createTask,
   deleteTask,
+  restoreTask,
   startTask,
 } from "@/server/tasks/commands";
 import {
@@ -291,40 +292,121 @@ describe("tier 1: nobody but the owner reads a personal task", () => {
 });
 
 describe("listMyDeletedTasks", () => {
-  it("lists the user's deleted tasks and steps, newest deletion first, with the parent of a step", async () => {
+  async function stepsOf(parentId: string) {
+    return db.select().from(tasks).where(eq(tasks.parentTaskId, parentId)).orderBy(asc(tasks.title));
+  }
+
+  it("P1: steps deleted with their task are listed inside the task's row, not as rows of their own", async () => {
+    const me = await newUser("student");
+    clock(0);
+    const parent = await makeTask(me, "Parent", { steps: ["Step A", "Step B", "Step C"] });
+    clock(10);
+    await deleteTask(me, { taskId: parent });
+
+    const list = await listMyDeletedTasks(me);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: parent, title: "Parent", parent: null });
+    expect(list[0].stepsDeletedWithIt.sort()).toEqual(["Step A", "Step B", "Step C"]);
+  });
+
+  it("a step deleted on its own keeps its own row, also when its task is deleted later", async () => {
+    const me = await newUser("student");
+    clock(0);
+    const parent = await makeTask(me, "Parent", { steps: ["Step A", "Step B"] });
+    const [stepA] = await stepsOf(parent);
+    clock(5);
+    await deleteTask(me, { taskId: stepA.id }); // on its own, earlier
+    clock(15);
+    await deleteTask(me, { taskId: parent }); // takes Step B with it
+
+    const list = await listMyDeletedTasks(me);
+    expect(list.map((t) => t.title)).toEqual(["Parent", "Step A"]);
+    expect(list[0].stepsDeletedWithIt).toEqual(["Step B"]);
+    expect(list[1]).toMatchObject({
+      id: stepA.id,
+      parent: { id: parent, title: "Parent", deleted: true },
+      stepsDeletedWithIt: [],
+    });
+  });
+
+  it("lists the user's deleted tasks newest first, and never another user's", async () => {
     const me = await newUser("student");
     const other = await newUser("student");
     clock(0);
-    const parent = await makeTask(me, "Parent", { steps: ["Step A", "Step B"] });
-    const alone = await makeTask(me, "Alone");
+    const first = await makeTask(me, "First");
+    const second = await makeTask(me, "Second");
     const theirs = await makeTask(other, "Theirs");
-    const [stepA] = await db.select().from(tasks).where(eq(tasks.parentTaskId, parent)).limit(1);
     clock(5);
-    await deleteTask(me, { taskId: stepA.id });
+    await deleteTask(me, { taskId: first });
     clock(10);
-    await deleteTask(me, { taskId: alone });
-    clock(15);
-    await deleteTask(me, { taskId: parent });
+    await deleteTask(me, { taskId: second });
     await deleteTask(other, { taskId: theirs });
 
     const list = await listMyDeletedTasks(me);
-    expect(list.map((t) => t.title)).toEqual(["Parent", "Step B", "Alone", stepA.title]);
-    const stepB = list.find((t) => t.title === "Step B");
-    expect(stepB?.parent).toEqual({ id: parent, title: "Parent", deleted: true });
-    expect(list.find((t) => t.id === stepA.id)?.parent?.deleted).toBe(true);
-    expect(list.find((t) => t.title === "Alone")?.parent).toBeNull();
-    expect(list.every((t) => t.title !== "Theirs")).toBe(true);
+    expect(list.map((t) => t.title)).toEqual(["Second", "First"]);
+    expect(list.every((t) => t.parent === null && t.stepsDeletedWithIt.length === 0)).toBe(true);
+  });
+
+  it("says why a step cannot be restored yet, so the screen can disable Restore", async () => {
+    const me = await newUser("student");
+    clock(0);
+    const parent = await makeTask(me, "Parent", { steps: ["Step A", "Step B"] });
+    const [stepA, stepB] = await stepsOf(parent);
+    clock(5);
+    await deleteTask(me, { taskId: stepA.id }); // on its own
+    clock(10);
+    await deleteTask(me, { taskId: parent });
+
+    // Its task is deleted: blocked. The task itself is not blocked.
+    let list = await listMyDeletedTasks(me);
+    expect(list.find((t) => t.id === stepA.id)?.restoreBlocked).toBe("Restore the task first.");
+    expect(list.find((t) => t.id === parent)?.restoreBlocked).toBeNull();
+    expect((await getMyTask(me, stepA.id))?.restoreBlocked).toBe("Restore the task first.");
+    expect((await getMyTask(me, parent))?.restoreBlocked).toBeNull();
+
+    // The task is back: nothing blocks the step any more.
+    clock(20);
+    await restoreTask(me, { taskId: parent });
+    list = await listMyDeletedTasks(me);
+    expect(list.find((t) => t.id === stepA.id)?.restoreBlocked).toBeNull();
+    expect((await getMyTask(me, stepA.id))?.restoreBlocked).toBeNull();
+    expect(stepB.id).toBeDefined();
+  });
+
+  it("a not-done step cannot come back into a Done task: 'Reopen the task first.'", async () => {
+    const me = await newUser("student");
+    clock(0);
+    const parent = await makeTask(me, "Parent", { steps: ["Step A", "Step B"] });
+    const [stepA] = await stepsOf(parent);
+    clock(5);
+    await deleteTask(me, { taskId: stepA.id });
+    clock(10);
+    await completeTask(me, { taskId: parent, completeAllSteps: true });
+
+    const item = (await listMyDeletedTasks(me)).find((t) => t.id === stepA.id);
+    expect(item?.restoreBlocked).toBe("Reopen the task first.");
+    expect((await getMyTask(me, stepA.id))?.restoreBlocked).toBe("Reopen the task first.");
+  });
+
+  it("a live task or step has no restore block", async () => {
+    const me = await newUser("student");
+    clock(0);
+    const parent = await makeTask(me, "Parent", { steps: ["Step A"] });
+    const [step] = await stepsOf(parent);
+    expect((await getMyTask(me, parent))?.restoreBlocked).toBeNull();
+    expect((await getMyTask(me, step.id))?.restoreBlocked).toBeNull();
   });
 
   it("shows a step deleted on its own with a parent that is still live", async () => {
     const me = await newUser("student");
     clock(0);
     const parent = await makeTask(me, "Parent", { steps: ["Step A"] });
-    const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, parent));
+    const [step] = await stepsOf(parent);
     clock(5);
     await deleteTask(me, { taskId: step.id });
     const [item] = await listMyDeletedTasks(me);
     expect(item.parent).toEqual({ id: parent, title: "Parent", deleted: false });
+    expect(item.stepsDeletedWithIt).toEqual([]);
   });
 });
 

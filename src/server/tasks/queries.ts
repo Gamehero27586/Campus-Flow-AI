@@ -5,7 +5,7 @@ import type { TaskCategory, TaskPriority, TaskStatus } from "@/config/task-value
 import type { CurrentUser } from "@/server/auth/current-user";
 import { db } from "@/server/db/client";
 import { tasks } from "@/server/db/schema";
-import type { TaskTarget } from "@/server/tasks/policy";
+import { restoreBlock, type TaskTarget } from "@/server/tasks/policy";
 import type { RecordScope } from "@/server/policies/evaluate-record";
 
 // Every query here is scoped to the signed-in user IN THE QUERY: context = 'personal' AND
@@ -103,6 +103,7 @@ export type TaskListItem = {
   category: TaskCategory;
   categoryOther: string | null;
   deadline: Date | null;
+  createdAt: Date;
   stepsDone: number;
   stepsTotal: number;
 };
@@ -125,6 +126,7 @@ export async function listMyTasks(user: CurrentUser, filter: TaskListFilter): Pr
       category: tasks.category,
       categoryOther: tasks.categoryOther,
       deadline: tasks.deadline,
+      createdAt: tasks.createdAt,
       stepsTotal: sql<number>`(select count(*) from "tasks" "step_task" where ${stepTask.parentTaskId} = "tasks"."id" and ${stepTask.deletedAt} is null)::int`,
       stepsDone: sql<number>`(select count(*) from "tasks" "step_task" where ${stepTask.parentTaskId} = "tasks"."id" and ${stepTask.deletedAt} is null and ${stepTask.status} = 'done')::int`,
     })
@@ -169,6 +171,8 @@ export type TaskDetail = {
   deletedAt: Date | null;
   /** Set for a step: the task it belongs to. */
   parent: { id: string; title: string } | null;
+  /** For a deleted step: why it cannot be restored yet ("Restore the task first."), or null. */
+  restoreBlocked: string | null;
   /** Steps that are not deleted, oldest first. Empty for a step. */
   steps: StepDetail[];
 };
@@ -194,13 +198,15 @@ export async function getMyTask(user: CurrentUser, taskId: string): Promise<Task
       deletedAt: tasks.deletedAt,
       parentId: parentTask.id,
       parentTitle: parentTask.title,
+      parentStatus: parentTask.status,
+      parentDeletedAt: parentTask.deletedAt,
     })
     .from(tasks)
     .leftJoin(parentTask, eq(parentTask.id, tasks.parentTaskId))
     .where(ownPersonalTask(user.id, taskId));
   if (!row) return null;
 
-  const { parentId, parentTitle, ...task } = row;
+  const { parentId, parentTitle, parentStatus, parentDeletedAt, ...task } = row;
   const steps = await db
     .select({
       id: tasks.id,
@@ -225,6 +231,13 @@ export async function getMyTask(user: CurrentUser, taskId: string): Promise<Task
   return {
     ...task,
     parent: parentId && parentTitle !== null ? { id: parentId, title: parentTitle } : null,
+    restoreBlocked:
+      task.deletedAt !== null && parentStatus
+        ? (restoreBlock({
+            status: task.status,
+            parent: { status: parentStatus, deletedAt: parentDeletedAt },
+          })?.message ?? null)
+        : null,
     steps,
   };
 }
@@ -235,9 +248,20 @@ export type DeletedTaskItem = {
   deletedAt: Date;
   /** Set for a deleted step: the task it belongs to, and whether that task is deleted too. */
   parent: { id: string; title: string; deleted: boolean } | null;
+  /** Why this cannot be restored yet ("Restore the task first."), or null. The screen disables Restore. */
+  restoreBlocked: string | null;
+  /**
+   * Titles of the steps that were deleted at the same moment as this task. They have no row of their own:
+   * restoring the task brings them back (rule R-g), so they are shown inside the task's row.
+   */
+  stepsDeletedWithIt: string[];
 };
 
-/** The user's deleted tasks and steps, most recently deleted first. */
+/**
+ * The user's deleted tasks and steps, most recently deleted first. A step deleted together with its task
+ * (the same `deleted_at`) is listed inside the task's row, not as a row of its own. A step deleted on its own
+ * keeps its own row, even when its task was deleted later.
+ */
 export async function listMyDeletedTasks(user: CurrentUser): Promise<DeletedTaskItem[]> {
   const rows = await db
     .select({
@@ -245,7 +269,9 @@ export async function listMyDeletedTasks(user: CurrentUser): Promise<DeletedTask
       title: tasks.title,
       deletedAt: tasks.deletedAt,
       parentId: parentTask.id,
+      status: tasks.status,
       parentTitle: parentTask.title,
+      parentStatus: parentTask.status,
       parentDeletedAt: parentTask.deletedAt,
     })
     .from(tasks)
@@ -253,15 +279,36 @@ export async function listMyDeletedTasks(user: CurrentUser): Promise<DeletedTask
     .where(
       and(eq(tasks.context, "personal"), eq(tasks.assigneeId, user.id), isNotNull(tasks.deletedAt)),
     )
-    .orderBy(desc(tasks.deletedAt), asc(tasks.createdAt));
+    // A task comes before the steps that were deleted with it (same moment), then oldest first.
+    .orderBy(desc(tasks.deletedAt), sql`${tasks.parentTaskId} is not null`, asc(tasks.createdAt));
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    deletedAt: row.deletedAt as Date,
-    parent:
-      row.parentId && row.parentTitle !== null
-        ? { id: row.parentId, title: row.parentTitle, deleted: row.parentDeletedAt !== null }
-        : null,
-  }));
+  const sameMoment = (row: (typeof rows)[number]) =>
+    row.parentDeletedAt !== null && row.parentDeletedAt.getTime() === row.deletedAt?.getTime();
+
+  const withTask = new Map<string, string[]>();
+  for (const row of rows) {
+    if (row.parentId && sameMoment(row)) {
+      withTask.set(row.parentId, [...(withTask.get(row.parentId) ?? []), row.title]);
+    }
+  }
+
+  return rows
+    .filter((row) => !(row.parentId && sameMoment(row)))
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      deletedAt: row.deletedAt as Date,
+      parent:
+        row.parentId && row.parentTitle !== null
+          ? { id: row.parentId, title: row.parentTitle, deleted: row.parentDeletedAt !== null }
+          : null,
+      restoreBlocked:
+        row.parentId && row.parentStatus
+          ? (restoreBlock({
+              status: row.status,
+              parent: { status: row.parentStatus, deletedAt: row.parentDeletedAt },
+            })?.message ?? null)
+          : null,
+      stepsDeletedWithIt: withTask.get(row.id) ?? [],
+    }));
 }

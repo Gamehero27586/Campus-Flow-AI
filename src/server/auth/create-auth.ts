@@ -20,6 +20,8 @@ type AuthDatabase = Parameters<typeof drizzleAdapter>[0];
 export type AuthSettings = {
   secret: string;
   baseURL: string;
+  /** Extra origins Better Auth accepts requests from (development only: a phone on the home network). */
+  trustedOrigins?: (request?: Request) => string[];
   google?: { clientId: string; clientSecret: string };
 };
 
@@ -76,6 +78,7 @@ export function createAuth(database: AuthDatabase, settings: AuthSettings) {
   return betterAuth({
     secret: settings.secret,
     baseURL: settings.baseURL,
+    trustedOrigins: settings.trustedOrigins,
     database: drizzleAdapter(database, {
       provider: "pg",
       schema: {

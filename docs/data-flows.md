@@ -31,13 +31,13 @@ All task changes go through `server/tasks/commands.ts`.
 | to done, personal or team task | **Assignee only** | Requires every subtask done, or the explicit "complete all" choice that completes the subtasks at the same moment. Sets `completed_at`; event. If `started_at` is empty, the UI asks once "When did you start?" (optional; any time between `created_at` and now). An answer sets `started_at` and writes `start_backfilled`; skipping leaves it empty |
 | to done, assignment task | **Only by submitting** (section 4) | The student cannot mark it done by hand |
 | done to todo or in_progress ("reopen") | Personal and team tasks, assignee only | `completed_at` cleared, `started_at` kept; event `reopened`. Assignment tasks cannot be reopened; faculty use `resubmission_until` |
-| Deadline changed (personal, team) | Assignee only | `original_deadline` set if empty; `reschedule_count` + 1 if moved later; event `deadline_changed` |
+| Deadline changed (personal, team) | Assignee only, **not while the task is Done** (reopen first) | `original_deadline` set if empty; `reschedule_count` + 1 if moved later; event `deadline_changed`. A deadline can be moved, never removed |
 | Deadline changed (assignment task) | Faculty only, through the assignment (section 3) | All recipient tasks updated; event per task; `reschedule_count` unchanged |
 | Edit title, description, priority, estimate (team task) | Any active member | Event not needed |
 | Reassign (team task) | Any active member, to an active member | `assignee_id` changed; event `reassigned` |
 | Delete | Personal tasks: owner. Team tasks: any active member | Soft delete, `deleted_reason = user_deleted`; event. Students cannot delete assignment tasks |
 | Subtask created or completed | Assignee | One level only; copies the parent's context, assignee, assignment and team. Completing all subtasks does **not** auto-complete the parent |
-| Subtask started while the parent is To Do (R-a) | Assignee | The parent also moves to In progress and gets `started_at` if empty (never overwritten), at the same moment, with its own `status_changed` event |
+| Subtask started, or completed straight from To Do, while the parent is To Do (R-a, R-a2) | Assignee | The parent also moves to In progress and gets `started_at` if empty (never overwritten), at the same moment, with its own `status_changed` event. The screen tells the person with a toast. Completing the last step still does not complete the parent |
 | Subtask added to a Done parent (R-b) | Assignee | Refused: "Reopen the task to add steps". At most 30 steps per task (not counting deleted ones) |
 | Subtask reopened while the parent is Done (R-c) | Assignee | Refused: "Reopen the task first" |
 | Subtask category and priority (R-d) | Assignee | Copied from the parent; when the parent's change, every subtask follows (deleted ones too). A subtask has a title, status, optional deadline and estimate |
@@ -46,7 +46,7 @@ All task changes go through `server/tasks/commands.ts`.
 
 Edge cases to test: done, reopened, done again (`completed_at` is the latest, `started_at` the first); completing a parent with open subtasks without confirmation (refused); moving a deadline earlier (no increment); a teammate changing the status of someone else's task (refused); a "When did you start?" answer after `completed_at` or before `created_at` (refused); two tabs changing the same task (the second change is checked against the current status, not the page's copy).
 
-More edge cases for personal tasks (Slice 3, all tested): reopening to In progress a task that was never started gives it a start now; a deadline cannot be removed, only moved; moving a deadline to the same instant writes no event; completing a parent whose only open step is deleted is allowed; starting a step when the parent is already In progress leaves the parent alone; deleting a step on its own, then its parent, then restoring the parent leaves that step deleted; every action on a deleted task is refused until it is restored.
+More edge cases for personal tasks (Slice 3, all tested): reopening to In progress a task that was never started gives it a start now; a deadline cannot be removed, only moved; the deadline of a Done task cannot be moved until it is reopened (a late task cannot become on time afterwards); moving a deadline to the same instant writes no event; completing a parent whose only open step is deleted is allowed; starting a step when the parent is already In progress leaves the parent alone; deleting a step on its own, then its parent, then restoring the parent leaves that step deleted; every action on a deleted task is refused until it is restored.
 
 ## 3. Posting and managing an assignment
 

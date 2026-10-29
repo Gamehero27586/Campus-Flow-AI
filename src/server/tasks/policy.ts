@@ -103,8 +103,20 @@ export const updateSubtaskRules = () =>
     ),
   );
 
-/** Moving the deadline later or earlier (it cannot be removed, see the schema). */
-export const changeDeadlineRules = () => rules(notDeleted);
+/**
+ * Moving the deadline later or earlier (it cannot be removed, see the schema). Not on a Done task: on-time
+ * uses the current deadline, so moving it after the finish would turn a late task into an on-time one.
+ * Reopening clears `completed_at`, so a later finish is measured honestly against the new deadline
+ * (data-model.md §4 rule 5). Steps follow the same rule, for consistency.
+ */
+export const changeDeadlineRules = () =>
+  rules(
+    all(notDeleted, ({ record }) =>
+      record.status === "done"
+        ? stateForbids("task_done", "Reopen the task to change its deadline.")
+        : allow,
+    ),
+  );
 
 /** Adding a step to a task. `record` is the PARENT here. Rules R-b and the 30-step limit. */
 export const addSubtaskRules = () =>
@@ -241,11 +253,27 @@ export const restoreRules = () =>
         record.deletedAt !== null
           ? allow
           : stateForbids("not_deleted", "This task is not deleted."),
-      ({ record }) =>
-        record.parent?.deletedAt ? stateForbids("parent_deleted", "Restore the task first.") : allow,
-      ({ record }) =>
-        record.parent?.status === "done" && record.status !== "done"
-          ? stateForbids("parent_done", "Reopen the task first.")
-          : allow,
+      ({ record }) => {
+        const blocked = restoreBlock(record);
+        return blocked ? stateForbids(blocked.code, blocked.message) : allow;
+      },
     ),
   );
+
+/**
+ * Why a deleted step cannot be restored yet, or null when nothing in its parent stops it. The one place
+ * that says so: the restore rule above uses it, and the screens use it to disable the Restore button
+ * (and say why) instead of offering a click the server would refuse.
+ */
+export function restoreBlock(record: {
+  status: TaskStatus;
+  parent: { status: TaskStatus; deletedAt: Date | null } | null;
+}): { code: string; message: string } | null {
+  if (record.parent?.deletedAt) {
+    return { code: "parent_deleted", message: "Restore the task first." };
+  }
+  if (record.parent?.status === "done" && record.status !== "done") {
+    return { code: "parent_done", message: "Reopen the task first." };
+  }
+  return null;
+}

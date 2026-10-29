@@ -9,6 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Settings is in the user menu at the bottom of the sidebar, not here.
   const navItems: NavItem[] = [
     ...(permissions.has("dashboard.view") ? [{ href: "/dashboard", label: "Dashboard" }] : []),
+    ...(permissions.has("task.personal.manage") ? [{ href: "/tasks", label: "Tasks" }] : []),
     ...(permissions.has("admin.users.manage") ? [{ href: "/admin/users", label: "Users" }] : []),
     ...(permissions.has("admin.roles.edit_permissions")
       ? [{ href: "/admin/roles", label: "Roles" }]

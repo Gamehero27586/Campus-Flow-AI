@@ -963,6 +963,27 @@ describe("task actions: the record rules, as the owner", () => {
     }
   });
 
+  it("P2: the messages say 'Step' for a step and 'Task' for a task", async () => {
+    const setup = await actAs("student");
+    try {
+      const parent = await insertTask(setup.user!.id);
+      const step = await insertTask(setup.user!.id, { parentTaskId: parent.id, title: "Step" });
+      const message = async (
+        action: (state: null, data: FormData) => Promise<FormState>,
+        id: string,
+      ) => {
+        const result = await action(null, form({ taskId: id }));
+        return result?.ok ? result.message : "failed";
+      };
+      expect(await message(taskActions.deleteTaskAction, step.id)).toBe("Step deleted.");
+      expect(await message(taskActions.restoreTaskAction, step.id)).toBe("Step restored.");
+      expect(await message(taskActions.deleteTaskAction, parent.id)).toBe("Task deleted.");
+      expect(await message(taskActions.restoreTaskAction, parent.id)).toBe("Task restored.");
+    } finally {
+      await setup.restore();
+    }
+  });
+
   it("delete then restore round-trips, and a step of a deleted parent says 'restore the task first'", async () => {
     const setup = await actAs("student");
     try {

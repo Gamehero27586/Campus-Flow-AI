@@ -155,6 +155,11 @@ const PAGES: Record<string, PageSpec> = {
   "app/(app)/layout.tsx": { check: "requirePermission", key: null },
   "app/(app)/dashboard/page.tsx": { check: "requirePermission", key: "dashboard.view" },
   "app/(app)/settings/page.tsx": { check: "requirePermission", key: null },
+  // Personal tasks (tier 1): the key is the check, and every query is scoped to the signed-in user.
+  "app/(app)/tasks/page.tsx": { check: "requirePermission", key: "task.personal.manage" },
+  "app/(app)/tasks/new/page.tsx": { check: "requirePermission", key: "task.personal.manage" },
+  "app/(app)/tasks/[taskId]/page.tsx": { check: "requirePermission", key: "task.personal.manage" },
+  "app/(app)/tasks/deleted/page.tsx": { check: "requirePermission", key: "task.personal.manage" },
   "app/(app)/admin/page.tsx": { check: "requirePermission", key: "admin.users.manage" },
   "app/(app)/admin/users/page.tsx": { check: "requirePermission", key: "admin.users.manage" },
   "app/(app)/admin/roles/page.tsx": {

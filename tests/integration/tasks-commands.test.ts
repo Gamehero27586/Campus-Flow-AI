@@ -219,7 +219,7 @@ describe("start and move back", () => {
     clock(0);
     const id = await makeTask(user);
     clock(10);
-    expect(okData(await startTask(user, { taskId: id }))).toEqual({ taskId: id });
+    expect(okData(await startTask(user, { taskId: id }))).toEqual({ taskId: id, parentStarted: false });
 
     const task = await row(id);
     expect(task.status).toBe("in_progress");
@@ -412,14 +412,14 @@ describe("completing a task that has steps", () => {
     });
   });
 
-  it("completing the last step does not complete the parent", async () => {
+  it("completing the last step does not complete the parent (it only starts it, R-a2)", async () => {
     const user = await newStudent();
     clock(0);
     const id = await makeTask(user, { steps: ["One"] });
     const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, id));
     clock(30);
     await completeTask(user, { taskId: step.id, completeAllSteps: false });
-    expect((await row(id)).status).toBe("todo");
+    expect(await row(id)).toMatchObject({ status: "in_progress", completedAt: null });
   });
 
   it("a deleted step does not block completing the parent", async () => {
@@ -522,6 +522,53 @@ describe("backfillStart ('When did you start?')", () => {
 });
 
 describe("changeDeadline", () => {
+  it("C1: a Done task's deadline cannot be moved, so a late task cannot become on time afterwards", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { deadlineDate: "2026-11-02" }); // due 23:59 IST on the day it was made
+    clock(24 * 60); // finished the next day: late
+    await completeTask(user, { taskId: id, completeAllSteps: false });
+    const before = await row(id);
+    const eventsBefore = (await events(id)).length;
+
+    clock(24 * 60 + 5);
+    const result = await changeDeadline(user, { taskId: id, deadlineDate: "2026-11-10", deadlineTime: null });
+    expect(result).toEqual(failure("task_done"));
+    expect(result).toMatchObject({ error: { message: "Reopen the task to change its deadline." } });
+    expect(await row(id)).toEqual(before);
+    expect((await events(id)).length).toBe(eventsBefore);
+  });
+
+  it("C1: after reopening, the deadline can be moved, and the later finish is measured against it", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { deadlineDate: "2026-11-02" });
+    clock(24 * 60);
+    await completeTask(user, { taskId: id, completeAllSteps: false });
+    clock(24 * 60 + 5);
+    await reopenTask(user, { taskId: id, to: "in_progress" });
+    clock(24 * 60 + 10);
+    expect(
+      okData(await changeDeadline(user, { taskId: id, deadlineDate: "2026-11-10", deadlineTime: null })),
+    ).toMatchObject({ changed: true });
+    const task = await row(id);
+    expect(task.deadline).toEqual(new Date("2026-11-10T18:29:00Z"));
+    expect(task.rescheduleCount).toBe(1);
+    expect(task.completedAt).toBeNull();
+  });
+
+  it("C1: the same applies to a Done step", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One"] });
+    const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, id));
+    clock(10);
+    await completeTask(user, { taskId: step.id, completeAllSteps: false });
+    expect(
+      await changeDeadline(user, { taskId: step.id, deadlineDate: "2026-11-10", deadlineTime: null }),
+    ).toEqual(failure("task_done"));
+  });
+
   it("moving later keeps original_deadline, adds one to reschedule_count and logs the change", async () => {
     const user = await newStudent();
     clock(0);
@@ -832,6 +879,77 @@ describe("steps", () => {
     clock(40);
     await startTask(user, { taskId: steps[1].id });
     expect(await row(id)).toMatchObject({ status: "in_progress", startedAt: minutes(10) });
+  });
+
+  it("R-a2: completing a step straight from To Do while the parent is To Do also starts the parent", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One", "Two"] });
+    const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, id)).limit(1);
+    clock(25);
+    const result = okData(await completeTask(user, { taskId: step.id, completeAllSteps: false }));
+
+    expect(result.parentStarted).toBe(true);
+    expect(await row(step.id)).toMatchObject({ status: "done", completedAt: minutes(25), startedAt: null });
+    expect(await row(id)).toMatchObject({ status: "in_progress", startedAt: minutes(25), completedAt: null });
+    expect((await events(id)).at(-1)).toMatchObject({
+      eventType: "status_changed",
+      fromValue: "todo",
+      toValue: "in_progress",
+    });
+    expect((await events(id)).at(-1)?.createdAt).toEqual(minutes(25));
+  });
+
+  it("R-a2: a parent already in progress is left alone, and so is its started_at", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One", "Two"] });
+    const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, id)).orderBy(asc(tasks.title));
+    clock(10);
+    await startTask(user, { taskId: id });
+    clock(25);
+    const result = okData(await completeTask(user, { taskId: steps[0].id, completeAllSteps: false }));
+    expect(result.parentStarted).toBe(false);
+    expect(await row(id)).toMatchObject({ status: "in_progress", startedAt: minutes(10) });
+  });
+
+  it("R-a2: a parent that was moved back to To Do keeps its first started_at when a step is completed", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One"] });
+    const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, id));
+    clock(10);
+    await startTask(user, { taskId: id });
+    clock(20);
+    await moveBackToTodo(user, { taskId: id });
+    clock(30);
+    await completeTask(user, { taskId: step.id, completeAllSteps: false });
+    expect(await row(id)).toMatchObject({ status: "in_progress", startedAt: minutes(10) });
+  });
+
+  it("R-a and R-a2 tell the screen when the parent was started with the step", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One", "Two"] });
+    const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, id)).orderBy(asc(tasks.title));
+    clock(5);
+    expect(okData(await startTask(user, { taskId: steps[0].id })).parentStarted).toBe(true);
+    clock(6);
+    expect(okData(await startTask(user, { taskId: steps[1].id })).parentStarted).toBe(false);
+    // A top-level task never reports a started parent.
+    const other = await makeTask(user);
+    expect(okData(await startTask(user, { taskId: other })).parentStarted).toBe(false);
+  });
+
+  it("completing a step with 'complete all' off never touches a Done parent's step rules (R-c still holds)", async () => {
+    const user = await newStudent();
+    clock(0);
+    const id = await makeTask(user, { steps: ["One"] });
+    clock(5);
+    await completeTask(user, { taskId: id, completeAllSteps: true });
+    const [step] = await db.select().from(tasks).where(eq(tasks.parentTaskId, id));
+    expect(step.status).toBe("done");
+    expect((await row(id)).status).toBe("done");
   });
 
   it("R-c: a step of a Done parent cannot be reopened", async () => {

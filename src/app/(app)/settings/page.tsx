@@ -1,3 +1,4 @@
+import { BackButton } from "@/components/layout/back-button";
 import { ThemeSwitch } from "@/components/theme/theme-switch";
 import { env } from "@/env";
 import { listTimeZones } from "@/lib/schemas/settings";
@@ -24,6 +25,8 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         linked={linked === "google"}
         error={typeof error === "string" ? error : null}
       />
+      {/* Settings is reached from the user menu, so nothing on the page leads out of it. "/" sends the person to their own home. */}
+      <BackButton fallbackHref="/">Back</BackButton>
       <h1 className="text-2xl font-semibold text-brand">Settings</h1>
 
       <section aria-labelledby="account-heading" className="space-y-2">

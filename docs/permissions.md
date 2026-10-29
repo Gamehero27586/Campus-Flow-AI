@@ -209,7 +209,7 @@ Required cases (each item in sections 4, 5 and 6 becomes at least one test):
 - Admin changes the role of a faculty member who owns a class: refused, with the class listed.
 - **Admin edits a grade in any class: denied.** Admin reads that grade: allowed.
 - Admin transfers class ownership: allowed and audited. Admin submits for a student: denied.
-- Admin reads a student's personal task, or the subtasks of an assignment task: denied.
+- Admin reads a student's personal task, or the subtasks of an assignment task: denied. **Covered in Slice 3** (`tests/integration/tasks-queries.test.ts`, `tests/unit/tasks/policy.test.ts`, `tests/permissions/actions-matrix.test.ts` for every task action and 11 kinds of actor, and the browser flow `tests/e2e/personal-tasks.spec.ts`). Faculty reading a student's personal task: also covered (the Growth Tracker half waits for Slice 5).
 - Admin opens a submission file: allowed and audited.
 - Teammate changes the status of a task assigned to someone else: denied; reassigning it: allowed.
 - Downloading a submission file by direct URL while not authorised: not found.

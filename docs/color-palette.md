@@ -58,7 +58,7 @@ Danger is a true red, so "secondary action" (coral) and "danger" never look alik
 | `--background` | `#FAF7F2` | `--foreground` | `#2B2B2B` |
 | `--card`, `--popover` | `#FFFFFF` | `--card-foreground` | `#2B2B2B` |
 | `--primary` | `#0D4F4C` | `--primary-foreground` | `#FFFFFF` |
-| `--secondary` | `#E8735A` | `--secondary-foreground` | `#2B2B2B` |
+| `--secondary` (the coral accent colour) | `#E8735A` | `--secondary-foreground` | `#2B2B2B` |
 | `--accent` | `#F2B84B` | `--accent-foreground` | `#2B2B2B` |
 | `--muted` | `#F1ECE3` | `--muted-foreground` | `#6B655B` |
 | `--destructive` | `#B91C1C` | `--destructive-foreground` | `#FFFFFF` |
@@ -70,7 +70,7 @@ Danger is a true red, so "secondary action" (coral) and "danger" never look alik
 
 Components use these tokens (`bg-primary`, `text-muted-foreground` and so on), never raw hex values. [Verify] the exact variable names and colour format (shadcn's current Tailwind v4 setup may expect OKLCH values) when shadcn/ui is installed in Slice 0; keep the colours above.
 
-**Decided (owner, 26 Oct 2026, decisions.md §19): secondary buttons are teal outline; coral stays the accent for "Break this down". Earlier open question:** whether secondary buttons stay coral fill with dark text (as above), or become teal outline with coral kept as the 10% accent for one signature action such as "Break this down".
+**Secondary buttons are teal outline** (owner's decision, 26 Oct 2026, `decisions.md` §19): the `secondary` button variant is transparent with a `--brand` border and `--brand` text (teal in light mode, the light teal in dark mode), and `teal-soft` on hover. The `--secondary` coral token stays the 10% accent: logo dots, and one signature action, the "Break this down" AI button in Slice 4. Primary actions (Start, Mark done, Save) stay solid teal.
 
 ## 5. Task states and charts
 

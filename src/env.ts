@@ -23,6 +23,11 @@ const envSchema = z.object({
   // "yes" marks the TEST database (docs/decisions.md §18). It enables the destructive dev scripts and,
   // below, makes the app refuse any address other than this computer.
   DEV_DB_RESET_ALLOWED: optionalString,
+  // "yes" lets a phone on your home Wi-Fi use the dev server (docs/decisions.md §19). It works only in
+  // `npm run dev`: in a build or a production run it is ignored (see below), so it can stay in .env.local.
+  // The address of this computer changes from time to time, so this is a switch, not an address: any
+  // private network address is accepted, nothing else.
+  DEV_ALLOW_LAN: optionalString,
   OLLAMA_URL: z.string().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b"),
 });
@@ -44,4 +49,13 @@ if (parsed.data.DEV_DB_RESET_ALLOWED === "yes" && !isLocalAddress(parsed.data.BE
   );
 }
 
-export const env = parsed.data;
+// Letting a phone on the home network use the dev server is for development only. Anywhere else (a build,
+// a production run, the tests) the switch is switched OFF here, once, so no other file can honour it by mistake.
+if (parsed.data.DEV_ALLOW_LAN !== undefined && parsed.data.DEV_ALLOW_LAN !== "yes") {
+  throw new Error('DEV_ALLOW_LAN must be "yes" or not set.');
+}
+
+export const env = {
+  ...parsed.data,
+  DEV_ALLOW_LAN: parsed.data.NODE_ENV === "development" ? parsed.data.DEV_ALLOW_LAN : undefined,
+};

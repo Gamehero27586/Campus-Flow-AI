@@ -316,6 +316,32 @@ export async function changeDeadline(actor: CurrentUser, input: ChangeDeadlineIn
 // ---- Status --------------------------------------------------------------------------------------
 
 /**
+ * Rules R-a and R-a2: a step is part of its parent, so when a step is started or completed while the parent
+ * is still To Do, the parent moves to In progress at the same moment (`started_at` if empty, never
+ * overwritten) with its own `status_changed` event. Returns whether it did, so the screen can tell the
+ * person ("The task was started with its step") instead of leaving them wondering.
+ */
+async function startParentIfTodo(
+  tx: Tx,
+  target: TaskTarget,
+  at: Date,
+  events: NewEvent[],
+): Promise<boolean> {
+  if (!target.parent || target.parent.status !== "todo") return false;
+  await tx
+    .update(tasks)
+    .set({ status: "in_progress", startedAt: target.parent.startedAt ?? at, updatedAt: at })
+    .where(and(eq(tasks.id, target.parent.id), eq(tasks.status, "todo")));
+  events.push({
+    taskId: target.parent.id,
+    eventType: "status_changed",
+    fromValue: "todo",
+    toValue: "in_progress",
+  });
+  return true;
+}
+
+/**
  * To Do to In progress. `started_at` is set if empty and never overwritten. Rule R-a: starting a step
  * while its parent is To Do also starts the parent, at the same moment, with its own event.
  */
@@ -329,20 +355,9 @@ export async function startTask(actor: CurrentUser, input: TaskActionInput) {
       { taskId: target.id, eventType: "status_changed", fromValue: "todo", toValue: "in_progress" },
     ];
 
-    if (target.parent && target.parent.status === "todo") {
-      await tx
-        .update(tasks)
-        .set({ status: "in_progress", startedAt: target.parent.startedAt ?? at, updatedAt: at })
-        .where(and(eq(tasks.id, target.parent.id), eq(tasks.status, "todo")));
-      events.push({
-        taskId: target.parent.id,
-        eventType: "status_changed",
-        fromValue: "todo",
-        toValue: "in_progress",
-      });
-    }
+    const parentStarted = await startParentIfTodo(tx, target, at, events);
     await writeEvents(tx, actor, at, events);
-    return ok({ taskId: target.id });
+    return ok({ taskId: target.id, parentStarted });
   });
 }
 
@@ -363,7 +378,7 @@ export async function moveBackToTodo(actor: CurrentUser, input: TaskActionInput)
 /**
  * To Done. Sets `completed_at`. A task with steps that are not done needs `completeAllSteps` (checked by
  * the rules); the steps then complete at the same instant. Completing the last step never completes the
- * parent by itself. `askStartTime` tells the screen to ask "When did you start?" once, for a top-level task
+ * parent by itself, but completing a step while the parent is To Do starts the parent (rule R-a2). `askStartTime` tells the screen to ask "When did you start?" once, for a top-level task
  * that was never started.
  */
 export async function completeTask(actor: CurrentUser, input: CompleteTaskInput) {
@@ -417,10 +432,12 @@ export async function completeTask(actor: CurrentUser, input: CompleteTaskInput)
         fromValue: target.status,
         toValue: "done",
       });
+      const parentStarted = await startParentIfTodo(tx, target, at, events);
       await writeEvents(tx, actor, at, events);
 
       return ok({
         taskId: target.id,
+        parentStarted,
         askStartTime: target.parentTaskId === null && target.startedAt === null,
       });
     },

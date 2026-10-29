@@ -193,7 +193,11 @@ export async function changeDeadlineAction(
   return { ok: true, message: result.data.changed ? "Deadline changed." : "Deadline unchanged." };
 }
 
-export async function startTaskAction(_previous: FormState, formData: FormData): Promise<FormState> {
+/** `parentStarted` is true when starting a step also started its parent (rule R-a): the screen says so. */
+export async function startTaskAction(
+  _previous: FormState<{ parentStarted: boolean }>,
+  formData: FormData,
+): Promise<FormState<{ parentStarted: boolean }>> {
   const parsed = taskActionSchema.safeParse({ taskId: formData.get("taskId") });
   if (!parsed.success) return invalid(parsed.error);
 
@@ -208,7 +212,13 @@ export async function startTaskAction(_previous: FormState, formData: FormData):
   if (!result.ok) return result;
 
   revalidateTasks();
-  return { ok: true, message: "Started." };
+  return {
+    ok: true,
+    message: result.data.parentStarted
+      ? "Step started. The task was started with it."
+      : "Started.",
+    data: { parentStarted: result.data.parentStarted },
+  };
 }
 
 export async function moveBackToTodoAction(
@@ -232,10 +242,14 @@ export async function moveBackToTodoAction(
   return { ok: true, message: "Moved back to To Do." };
 }
 
+/**
+ * `askStartTime`: ask "When did you start?" once. `parentStarted`: completing a step also started its
+ * parent (rule R-a2), and the screen says so.
+ */
 export async function completeTaskAction(
-  _previous: FormState<{ askStartTime: boolean }>,
+  _previous: FormState<{ askStartTime: boolean; parentStarted: boolean }>,
   formData: FormData,
-): Promise<FormState<{ askStartTime: boolean }>> {
+): Promise<FormState<{ askStartTime: boolean; parentStarted: boolean }>> {
   const parsed = completeTaskSchema.safeParse({
     taskId: formData.get("taskId"),
     completeAllSteps: formData.get("completeAllSteps"),
@@ -255,8 +269,13 @@ export async function completeTaskAction(
   revalidateTasks();
   return {
     ok: true,
-    message: "Marked done.",
-    data: { askStartTime: result.data.askStartTime },
+    message: result.data.parentStarted
+      ? "Step done. The task was started with it."
+      : "Marked done.",
+    data: {
+      askStartTime: result.data.askStartTime,
+      parentStarted: result.data.parentStarted,
+    },
   };
 }
 
@@ -329,7 +348,7 @@ export async function deleteTaskAction(
   if (!result.ok) return result;
 
   revalidateTasks();
-  return { ok: true, message: "Task deleted." };
+  return { ok: true, message: authorization.record.parentTaskId ? "Step deleted." : "Task deleted." };
 }
 
 export async function restoreTaskAction(
@@ -350,5 +369,5 @@ export async function restoreTaskAction(
   if (!result.ok) return result;
 
   revalidateTasks();
-  return { ok: true, message: "Task restored." };
+  return { ok: true, message: authorization.record.parentTaskId ? "Step restored." : "Task restored." };
 }

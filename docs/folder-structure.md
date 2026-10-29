@@ -66,7 +66,7 @@ campus-flow-ai/
       (onboarding)/         welcome (username and optional requested role), pending
       (app)/                Signed-in shell (layout with navigation)
         dashboard/
-        tasks/              [taskId]/
+        tasks/              page.tsx (list), new/ (the form as a page), [taskId]/ (detail), deleted/; actions.ts (the 12 server actions); client pieces next to them: task-forms, task-buttons, start-prompt, task-card, task-badges, use-action-form
         tracker/
         classes/            join/, [classId]/ (assignments/, members/, tracker/)
         teams/              [teamId]/
@@ -77,7 +77,7 @@ campus-flow-ai/
         uploads/            Permission-checked, streamed upload
         files/[fileId]/     Permission-checked download
     components/
-      ui/                   shadcn components
+      ui/                   shadcn components (dialog.tsx is a pop-up on a laptop and a full-screen sheet on a phone)
       layout/               Shell, navigation, "Viewing as admin" banner, "Simulated data" banner
       <feature>/            One folder per feature (tasks/, classes/, ...)
     lib/                    Pure helpers (time.ts, format.ts, errors.ts, result.ts), safe for client and server
@@ -90,7 +90,7 @@ campus-flow-ai/
       audit/                write-audit.ts
       rate-limit.ts         In-memory limiter (join codes, invitations, AI)
       storage/              types.ts (the interface), local.ts, index.ts
-      tasks/                policy.ts, queries.ts, commands.ts, schemas.ts
+      tasks/                policy.ts, queries.ts, commands.ts, time.ts (local date and time to UTC, in PostgreSQL). The Zod schemas the forms share are in src/lib/schemas/tasks.ts; the fixed choices (category, priority, status and their labels) are in src/config/task-values.ts
       classes/              (same four files)
       assignments/          (same four files)
       submissions/          (same four files, includes grading)
@@ -176,7 +176,7 @@ Every page requires a permission key (and the relationship check where it names 
 | `/welcome` | Signed-in users without a username (shown once) | none (status check allows it) |
 | `/pending` | Pending users | none (status check allows it) |
 | `/dashboard` | All active users; content follows the role | `dashboard.view` |
-| `/tasks`, `/tasks/[taskId]` | Students (Faculty if enabled) | `task.personal.manage`; assignment tasks `assignment.view`; team tasks `team.use` |
+| `/tasks`, `/tasks/new`, `/tasks/[taskId]`, `/tasks/deleted` | Students (Faculty if enabled) | `task.personal.manage`; assignment tasks `assignment.view`; team tasks `team.use` |
 | `/tracker` | Students (Faculty if enabled) | `tracker.personal.view` |
 | `/classes` | Students, Faculty, Admin | `class.view` |
 | `/classes/join` | Students | `class.join` |

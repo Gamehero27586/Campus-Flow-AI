@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Emblem } from "@/components/brand/emblem";
+import { NavigationTracker } from "@/components/layout/navigation-history";
 import { NavLink } from "@/components/layout/nav-link";
 import { UserMenu } from "@/components/layout/user-menu";
 
@@ -39,6 +40,7 @@ export function AppShell({
         </div>
       </aside>
       <main className="flex-1 p-4 md:p-8">{children}</main>
+      <NavigationTracker />
     </div>
   );
 }
