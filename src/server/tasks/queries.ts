@@ -146,6 +146,8 @@ export async function listMyTasks(user: CurrentUser, filter: TaskListFilter): Pr
 export type StepDetail = {
   id: string;
   title: string;
+  /** "ai_breakdown" for a step saved from an AI suggestion: the screen labels it in words. */
+  source: "manual" | "ai_breakdown";
   status: TaskStatus;
   deadline: Date | null;
   estimateMinutes: number | null;
@@ -171,6 +173,8 @@ export type TaskDetail = {
   deletedAt: Date | null;
   /** Set for a step: the task it belongs to. */
   parent: { id: string; title: string } | null;
+  /** "ai_breakdown" for a step saved from an AI suggestion. */
+  source: "manual" | "ai_breakdown";
   /** For a deleted step: why it cannot be restored yet ("Restore the task first."), or null. */
   restoreBlocked: string | null;
   /** Steps that are not deleted, oldest first. Empty for a step. */
@@ -184,6 +188,7 @@ export async function getMyTask(user: CurrentUser, taskId: string): Promise<Task
       id: tasks.id,
       title: tasks.title,
       description: tasks.description,
+      source: tasks.source,
       status: tasks.status,
       priority: tasks.priority,
       category: tasks.category,
@@ -211,6 +216,7 @@ export async function getMyTask(user: CurrentUser, taskId: string): Promise<Task
     .select({
       id: tasks.id,
       title: tasks.title,
+      source: tasks.source,
       status: tasks.status,
       deadline: tasks.deadline,
       estimateMinutes: tasks.estimateMinutes,

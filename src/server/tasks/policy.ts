@@ -1,5 +1,5 @@
 import "server-only";
-import { MAX_SUBTASKS_PER_TASK } from "@/config/limits";
+import { AI_STEPS_MIN, MAX_SUBTASKS_PER_TASK } from "@/config/limits";
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/config/task-values";
 import {
   allow,
@@ -118,8 +118,11 @@ export const changeDeadlineRules = () =>
     ),
   );
 
-/** Adding a step to a task. `record` is the PARENT here. Rules R-b and the 30-step limit. */
-export const addSubtaskRules = () =>
+/**
+ * Adding `count` steps to a task at once. `record` is the PARENT here. Rules R-b and the 30-step limit.
+ * One step is the ordinary "add a step"; several at once is saving an AI breakdown.
+ */
+export const addStepsRules = (count: number) =>
   rules(
     all(
       notDeleted,
@@ -129,7 +132,7 @@ export const addSubtaskRules = () =>
           ? stateForbids("parent_done", "Reopen the task to add steps.")
           : allow,
       ({ record }) =>
-        record.stepCount >= MAX_SUBTASKS_PER_TASK
+        record.stepCount + count > MAX_SUBTASKS_PER_TASK
           ? stateForbids(
               "too_many_steps",
               `A task can have at most ${MAX_SUBTASKS_PER_TASK} steps.`,
@@ -137,6 +140,42 @@ export const addSubtaskRules = () =>
           : allow,
     ),
   );
+
+/** Adding one step to a task. */
+export const addSubtaskRules = () => addStepsRules(1);
+
+/**
+ * Asking the AI to break a task down (rules AI-a and AI-b): your own top-level personal task that is not
+ * deleted and not Done, with room for at least AI_STEPS_MIN more steps. Anything else is refused with the
+ * reason in words, so the screen can show it next to a disabled button.
+ */
+export const breakdownRules = () =>
+  rules(
+    all(
+      notDeleted,
+      isTopLevel("A step cannot be broken down any further.", "step_of_step"),
+      ({ record }) =>
+        record.status === "done"
+          ? stateForbids("task_done", "Reopen the task to break it down.")
+          : allow,
+      ({ record }) => {
+        const block = breakdownRoomBlock(record.stepCount);
+        return block ? stateForbids(block.code, block.message) : allow;
+      },
+    ),
+  );
+
+/**
+ * Why a task with this many steps cannot be broken down (AI-b), or null. The one place that says so: the rule above
+ * uses it, and the task page uses it to disable the button and say why.
+ */
+export function breakdownRoomBlock(stepCount: number): { code: string; message: string } | null {
+  if (stepCount <= MAX_SUBTASKS_PER_TASK - AI_STEPS_MIN) return null;
+  return {
+    code: "too_many_steps",
+    message: `This task already has ${stepCount} steps; a breakdown needs room for at least ${AI_STEPS_MIN} more (the limit is ${MAX_SUBTASKS_PER_TASK}).`,
+  };
+}
 
 // ---- Status --------------------------------------------------------------------------------------
 

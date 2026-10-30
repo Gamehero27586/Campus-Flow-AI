@@ -187,3 +187,6 @@ export const backfillStartSchema = z.object({
   startTime: localTime,
 });
 export type BackfillStartInput = z.output<typeof backfillStartSchema>;
+
+/** The field rules of the task forms, shared with other forms that edit steps (the AI breakdown review). */
+export const taskFieldSchemas = { title, estimateMinutes, optionalDate, optionalTime, timeNeedsDate, blankToNull };

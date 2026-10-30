@@ -21,13 +21,15 @@ import {
   taskSourceEnum,
   taskStatusEnum,
 } from "./enums";
+import { aiSuggestions } from "./ai";
 import { users } from "./auth";
 
 // Tasks and their history (docs/data-model.md §4). Only src/server/tasks/commands.ts writes these tables
 // (the seed script is the one allowed exception).
 //
-// assignment_id, team_id and ai_suggestion_id are plain uuid columns on purpose: the tables they point to
-// do not exist yet. Slices 4, 7 and 11 add the foreign keys in their own migrations.
+// assignment_id and team_id are plain uuid columns on purpose: the tables they point to do not exist yet.
+// Slices 7 and 11 add those foreign keys in their own migrations. ai_suggestion_id got its foreign key in
+// Slice 4 (migration 0004).
 // Rows are never hard-deleted (soft delete), so the self-reference restricts deletion.
 
 export const tasks = pgTable(
@@ -51,7 +53,7 @@ export const tasks = pgTable(
     priority: taskPriorityEnum("priority").notNull().default("medium"),
     status: taskStatusEnum("status").notNull().default("todo"),
     source: taskSourceEnum("source").notNull().default("manual"),
-    aiSuggestionId: uuid("ai_suggestion_id"),
+    aiSuggestionId: uuid("ai_suggestion_id").references((): AnyPgColumn => aiSuggestions.id),
     deadline: timestamp("deadline", { withTimezone: true }),
     originalDeadline: timestamp("original_deadline", { withTimezone: true }),
     rescheduleCount: integer("reschedule_count").notNull().default(0),
@@ -141,6 +143,11 @@ export const tasks = pgTable(
     check(
       "tasks_personal_delete_reason",
       sql`${table.context} <> 'personal' OR ${table.deletedReason} IS NULL OR ${table.deletedReason} = 'user_deleted'`,
+    ),
+    // A step made from an AI breakdown points at its suggestion, and only such a step does (Slice 4).
+    check(
+      "tasks_source_matches_suggestion",
+      sql`(${table.source} = 'ai_breakdown') = (${table.aiSuggestionId} IS NOT NULL)`,
     ),
     check("tasks_not_its_own_parent", sql`${table.parentTaskId} IS NULL OR ${table.parentTaskId} <> ${table.id}`),
     // A student never gets the same assignment twice, but can still have subtasks of it.

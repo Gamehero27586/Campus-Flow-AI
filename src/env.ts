@@ -28,6 +28,9 @@ const envSchema = z.object({
   // The address of this computer changes from time to time, so this is a switch, not an address: any
   // private network address is accepted, nothing else.
   DEV_ALLOW_LAN: optionalString,
+  // "yes" replaces the AI model with a fixed fake, so the browser tests do not need a graphics card. Allowed only
+  // on the TEST database (below): it is a test switch and no real student can be served with it.
+  AI_FAKE_MODEL: optionalString,
   OLLAMA_URL: z.string().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b"),
 });
@@ -53,6 +56,13 @@ if (parsed.data.DEV_DB_RESET_ALLOWED === "yes" && !isLocalAddress(parsed.data.BE
 // a production run, the tests) the switch is switched OFF here, once, so no other file can honour it by mistake.
 if (parsed.data.DEV_ALLOW_LAN !== undefined && parsed.data.DEV_ALLOW_LAN !== "yes") {
   throw new Error('DEV_ALLOW_LAN must be "yes" or not set.');
+}
+
+if (parsed.data.AI_FAKE_MODEL !== undefined && parsed.data.AI_FAKE_MODEL !== "yes") {
+  throw new Error('AI_FAKE_MODEL must be "yes" or not set.');
+}
+if (parsed.data.AI_FAKE_MODEL === "yes" && parsed.data.DEV_DB_RESET_ALLOWED !== "yes") {
+  throw new Error("AI_FAKE_MODEL can only be used with the test database (DEV_DB_RESET_ALLOWED=yes).");
 }
 
 export const env = {

@@ -17,7 +17,8 @@
     "studio": "drizzle-kit studio",
     "seed:base": "tsx --conditions=react-server scripts/seed-base.ts",
     "admin:promote": "tsx --conditions=react-server scripts/admin-promote.ts",
-    "db:reset": "tsx --conditions=react-server scripts/db-reset.ts"
+    "db:reset": "tsx --conditions=react-server scripts/db-reset.ts",
+    "eval:ai": "tsx --conditions=react-server scripts/eval-ai.ts"
   },
   "engines": {
     "node": ">=24"

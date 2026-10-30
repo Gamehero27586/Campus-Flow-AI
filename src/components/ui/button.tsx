@@ -14,6 +14,9 @@ const buttonVariants = cva(
         // one signature action, the AI "Break this down" button in Slice 4.
         secondary:
           "border-brand bg-transparent text-brand hover:bg-teal-soft aria-expanded:bg-teal-soft",
+        // The one coral accent: the AI "Break this down" button (docs/color-palette.md §3). Dark text on coral,
+        // never white (white on coral is 2.99:1).
+        ai: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:

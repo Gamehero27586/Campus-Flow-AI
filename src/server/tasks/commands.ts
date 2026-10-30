@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { MAX_SUBTASKS_PER_TASK } from "@/config/limits";
+import type { SaveBreakdownInput } from "@/lib/schemas/ai";
 import type { TaskStatus } from "@/config/task-values";
 import { fail, type Failure, ok } from "@/lib/result";
 import type {
@@ -15,12 +16,15 @@ import type {
   UpdateTaskInput,
 } from "@/lib/schemas/tasks";
 import { now } from "@/lib/time";
+import { saveSuggestionRules } from "@/server/ai/policy";
+import { findSuggestionTarget, ownBreakdownSuggestion } from "@/server/ai/queries";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { db } from "@/server/db/client";
-import { taskEvents, tasks } from "@/server/db/schema";
+import { aiSuggestions, taskEvents, tasks } from "@/server/db/schema";
 import { decisionToFailure } from "@/server/policies/decision";
 import { type RecordRules, runRules } from "@/server/policies/evaluate-record";
 import {
+  addStepsRules,
   addSubtaskRules,
   backfillStartRules,
   changeDeadlineRules,
@@ -121,6 +125,13 @@ async function onLockedTask<TResult>(
 
 const iso = (date: Date | null) => (date ? date.toISOString() : null);
 
+/**
+ * The created_at of the n-th row (counting from 1) of a batch made by one command: one millisecond apart, so the
+ * list, which sorts by created_at, shows steps in the order they were written. Rows with an identical
+ * created_at would fall back to their random ids and come back shuffled.
+ */
+const inBatch = (at: Date, position: number) => new Date(at.getTime() + position);
+
 async function deadlineFrom(
   tx: Tx,
   actor: CurrentUser,
@@ -167,7 +178,7 @@ export async function createTask(actor: CurrentUser, input: CreateTaskInput) {
       const steps = await tx
         .insert(tasks)
         .values(
-          input.steps.map((title) => ({
+          input.steps.map((title, index) => ({
             context: "personal" as const,
             createdBy: actor.id,
             assigneeId: actor.id,
@@ -176,7 +187,7 @@ export async function createTask(actor: CurrentUser, input: CreateTaskInput) {
             category: input.category,
             categoryOther: input.categoryOther,
             priority: input.priority,
-            createdAt: at,
+            createdAt: inBatch(at, index + 1),
             updatedAt: at,
           })),
         )
@@ -217,6 +228,106 @@ export async function createSubtask(actor: CurrentUser, input: CreateSubtaskInpu
       .returning({ id: tasks.id });
     await writeEvents(tx, actor, at, [{ taskId: step.id, eventType: "created" }]);
     return ok({ taskId: step.id });
+  });
+}
+
+/**
+ * Saves the steps of an AI breakdown (docs/slices/slice-4-plan.md 4c), in ONE transaction: locks the task and
+ * the suggestion, re-runs the rules on both (the task may take `items.length` more steps; the suggestion is
+ * the actor's own, still pending, valid, and was made for this task), inserts the steps, writes one `created`
+ * event per step, and resolves the suggestion.
+ *
+ * What the student was shown is read from the stored suggestion, never from the form: a row is "the AI's" only
+ * if it names a position in that list. AI rows are saved with source ai_breakdown and the suggestion id, and keep
+ * the estimate source "ai" while the minutes are unchanged; rows the student added are ordinary steps.
+ * outcome (AI-f): accepted when every suggested step is there, unchanged (title, minutes and date), and nothing
+ * was added; otherwise edited. items_kept (AI-g) counts the AI rows saved, edited or not.
+ * Rule R-a does not apply: creating steps starts nothing.
+ */
+export async function createStepsFromBreakdown(actor: CurrentUser, input: SaveBreakdownInput) {
+  return db.transaction(async (tx) => {
+    const checked = await lockAndCheck(tx, actor, input.taskId, addStepsRules(input.items.length));
+    if ("failure" in checked) return checked.failure;
+    const { target: parent } = checked;
+
+    // The suggestion is locked after the task, everywhere in the same order. Scoped to the actor in the query.
+    await tx.select({ id: aiSuggestions.id }).from(aiSuggestions).where(ownBreakdownSuggestion(actor.id, input.suggestionId)).for("update");
+    const suggestion = await findSuggestionTarget(tx, actor.id, input.suggestionId);
+    if (!suggestion) return fail("not_found", "That suggestion was not found.");
+    const decision = runRules(saveSuggestionRules(parent.id), {
+      user: actor,
+      permissions: NO_PERMISSIONS,
+      record: suggestion,
+    });
+    if (!decision.allow) return decisionToFailure(decision);
+
+    // A position the student names must exist in what they were shown.
+    for (const item of input.items) {
+      if (item.suggestedIndex !== null && item.suggestedIndex >= suggestion.suggested.length) {
+        return fail("invalid_input", "A step does not match the suggestion.");
+      }
+    }
+
+    const at = now();
+    const rows = [];
+    let allUnchanged = input.items.length === suggestion.suggested.length;
+    let itemsKept = 0;
+
+    for (const [index, item] of input.items.entries()) {
+      const deadline = await deadlineFrom(tx, actor, item.deadlineDate, item.deadlineTime);
+      const original = item.suggestedIndex === null ? null : suggestion.suggested[item.suggestedIndex];
+
+      if (original) {
+        itemsKept += 1;
+        const originalDeadline = original.deadline ? new Date(original.deadline) : null;
+        const sameDeadline = (deadline?.getTime() ?? null) === (originalDeadline?.getTime() ?? null);
+        if (item.title !== original.title || item.estimateMinutes !== original.minutes || !sameDeadline) {
+          allUnchanged = false;
+        }
+      } else {
+        allUnchanged = false;
+      }
+
+      rows.push({
+        context: "personal" as const,
+        createdBy: actor.id,
+        assigneeId: actor.id,
+        parentTaskId: parent.id,
+        title: item.title,
+        category: parent.category,
+        categoryOther: parent.categoryOther,
+        priority: parent.priority,
+        source: original ? ("ai_breakdown" as const) : ("manual" as const),
+        aiSuggestionId: original ? suggestion.id : null,
+        deadline,
+        originalDeadline: deadline,
+        estimateMinutes: item.estimateMinutes,
+        estimateSource:
+          item.estimateMinutes === null ? null : original && item.estimateMinutes === original.minutes ? ("ai" as const) : ("user" as const),
+        createdAt: inBatch(at, index + 1),
+        updatedAt: at,
+      });
+    }
+
+    const created = await tx.insert(tasks).values(rows).returning({ id: tasks.id, source: tasks.source });
+    await writeEvents(
+      tx,
+      actor,
+      at,
+      created.map((step) => ({
+        taskId: step.id,
+        eventType: "created" as const,
+        toValue: step.source === "ai_breakdown" ? "ai_breakdown" : "added_in_ai_review",
+      })),
+    );
+
+    const outcome = allUnchanged ? ("accepted" as const) : ("edited" as const);
+    await tx
+      .update(aiSuggestions)
+      .set({ outcome, itemsKept, resolvedAt: at })
+      .where(and(eq(aiSuggestions.id, suggestion.id), eq(aiSuggestions.outcome, "pending")));
+
+    return ok({ taskId: parent.id, suggestionId: suggestion.id, outcome, created: created.length, itemsKept });
   });
 }
 

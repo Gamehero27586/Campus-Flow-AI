@@ -187,8 +187,11 @@ describe("createTask", () => {
       .select()
       .from(tasks)
       .where(eq(tasks.parentTaskId, parentId))
-      .orderBy(asc(tasks.title));
-    expect(steps.map((s) => s.title)).toEqual(["Draft", "Outline"]);
+      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+    // In the order they were typed: each step's created_at is one millisecond after the one before, so the
+    // list (which sorts by created_at) cannot shuffle them by their random ids.
+    expect(steps.map((s) => s.title)).toEqual(["Outline", "Draft"]);
+    expect(steps.map((s) => s.createdAt.getTime() - T0.getTime())).toEqual([1, 2]);
     for (const step of steps) {
       expect(step).toMatchObject({
         context: "personal",
@@ -198,7 +201,6 @@ describe("createTask", () => {
         status: "todo",
         source: "manual",
       });
-      expect(step.createdAt).toEqual(T0);
       expect(await events(step.id)).toHaveLength(1);
     }
   });

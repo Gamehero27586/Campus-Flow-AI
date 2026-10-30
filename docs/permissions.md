@@ -107,7 +107,7 @@ Downloading has **no key**; it is decided entirely by the parent record (section
 |---|---|---|---|---|---|
 | `tracker.personal.view` | Your own Growth Tracker | D | e | | |
 | `tracker.class.view` | Class tracker (assigned versus submitted) | | D | D (view only) | |
-| `ai.use` | AI breakdown on your own tasks and AI suggestions in your own weekly summary | D | e | | |
+| `ai.use` | AI breakdown on your own tasks and AI suggestions in your own weekly summary. **Requesting, saving, discarding and rating a breakdown need both `ai.use` and `task.personal.manage`** (rule AI-e, confirmed 30 Oct 2026; rating asks for both too, the stricter reading, because AI-e did not name it) | D | e | | |
 
 **Total: 23 keys, 4 locked.** Faculty are *eligible* for personal tasks, the personal tracker and AI, so the Admin can switch these on for Faculty later; the code paths are the same as for students.
 
@@ -210,6 +210,7 @@ Required cases (each item in sections 4, 5 and 6 becomes at least one test):
 - **Admin edits a grade in any class: denied.** Admin reads that grade: allowed.
 - Admin transfers class ownership: allowed and audited. Admin submits for a student: denied.
 - Admin reads a student's personal task, or the subtasks of an assignment task: denied. **Covered in Slice 3** (`tests/integration/tasks-queries.test.ts`, `tests/unit/tasks/policy.test.ts`, `tests/permissions/actions-matrix.test.ts` for every task action and 11 kinds of actor, and the browser flow `tests/e2e/personal-tasks.spec.ts`). Faculty reading a student's personal task: also covered (the Growth Tracker half waits for Slice 5).
+- Admin reads a student's AI suggestion, or asks for, saves, discards or rates one for them: denied. **Covered in Slice 4** (`tests/permissions/actions-matrix.test.ts`: every AI action by every kind of actor, on the actor's own task and on another student's; both keys needed, one is not enough; `tests/unit/ai/policy.test.ts`; `tests/unit/tasks/policy.test.ts` for `breakdownRules` and `addStepsRules`; `tests/integration/ai-commands.test.ts`). A role without `ai.use` (Faculty by default) is refused by the key; a student who holds both keys sees someone else's suggestion as "not found".
 - Admin opens a submission file: allowed and audited.
 - Teammate changes the status of a task assigned to someone else: denied; reassigning it: allowed.
 - Downloading a submission file by direct URL while not authorised: not found.

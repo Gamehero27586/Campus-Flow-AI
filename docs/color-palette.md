@@ -70,7 +70,7 @@ Danger is a true red, so "secondary action" (coral) and "danger" never look alik
 
 Components use these tokens (`bg-primary`, `text-muted-foreground` and so on), never raw hex values. [Verify] the exact variable names and colour format (shadcn's current Tailwind v4 setup may expect OKLCH values) when shadcn/ui is installed in Slice 0; keep the colours above.
 
-**Secondary buttons are teal outline** (owner's decision, 26 Oct 2026, `decisions.md` §19): the `secondary` button variant is transparent with a `--brand` border and `--brand` text (teal in light mode, the light teal in dark mode), and `teal-soft` on hover. The `--secondary` coral token stays the 10% accent: logo dots, and one signature action, the "Break this down" AI button in Slice 4. Primary actions (Start, Mark done, Save) stay solid teal.
+**Secondary buttons are teal outline** (owner's decision, 26 Oct 2026, `decisions.md` §19): the `secondary` button variant is transparent with a `--brand` border and `--brand` text (teal in light mode, the light teal in dark mode), and `teal-soft` on hover. The `--secondary` coral token stays the 10% accent: logo dots, and one signature action, the "Break this down" AI button in Slice 4 (built: the `ai` button variant, coral background with `--secondary-foreground` dark text, never white). Primary actions (Start, Mark done, Save) stay solid teal.
 
 ## 5. Task states and charts
 

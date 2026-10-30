@@ -5,6 +5,7 @@ import type { FormState } from "@/lib/result";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { seedBase } from "@/server/auth/seed-base";
 import {
+  aiSuggestions,
   auditLogs,
   permissions,
   rolePermissions,
@@ -53,6 +54,12 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+// The AI actions run for real, but the model is the fixed fake (no Ollama, no network).
+vi.mock("@/server/ai/runtime", async () => {
+  const { createFakeClient } = await import("@/server/ai/fake-client");
+  const client = createFakeClient();
+  return { getOllamaClient: () => client };
+});
 
 // The database must exist BEFORE the actions are imported: Better Auth (used by the welcome action)
 // is built from the database client when its module loads.
@@ -65,6 +72,7 @@ const admin = await import("@/app/(app)/admin/users/actions");
 const settings = await import("@/app/(app)/settings/actions");
 const welcome = await import("@/app/(onboarding)/welcome/actions");
 const taskActions = await import("@/app/(app)/tasks/actions");
+const aiActions = await import("@/app/(app)/tasks/ai-actions");
 
 let roleIds: Record<string, string>;
 
@@ -995,6 +1003,316 @@ describe("task actions: the record rules, as the owner", () => {
       );
       expect(await call(taskActions.restoreTaskAction, { taskId: parent.id })).toBe("ok");
       expect((await taskSnapshot(step.id)).row.deletedAt).toBeNull();
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+// --- AI breakdown (Slice 4) -----------------------------------------------------------------------
+// Rule AI-e: requesting, saving, discarding (and rating) need BOTH ai.use and task.personal.manage. Students hold
+// both by default. Faculty may be given the task key but not ai.use (it is not on for them by default), so
+// "faculty with personal tasks on" is refused. A suggestion is tier 1: only its owner reaches it.
+
+const AI_OWNERS: ActorKind[] = ["student", "student with stray admin grants"];
+
+const SUGGESTED = [
+  { title: "Read the first half", minutes: 30 },
+  { title: "Read the second half", minutes: 30 },
+  { title: "Write the notes", minutes: 20 },
+];
+
+async function insertSuggestion(
+  ownerId: string,
+  taskId: string,
+  overrides: Partial<typeof aiSuggestions.$inferInsert> = {},
+) {
+  const [row] = await db
+    .insert(aiSuggestions)
+    .values({
+      userId: ownerId,
+      taskId,
+      kind: "breakdown",
+      model: "fake-model",
+      promptVersion: "breakdown.v2",
+      inputSnapshot: { title: "Read chapter 4", suggested: SUGGESTED.map((s) => ({ ...s, deadline: null })) },
+      outputValid: true,
+      itemsSuggested: SUGGESTED.length,
+      createdAt: LONG_AGO,
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
+type AiIds = { taskId: string; suggestionId: string };
+
+async function aiSnapshot(ids: AiIds) {
+  const suggestions = await db
+    .select()
+    .from(aiSuggestions)
+    .where(eq(aiSuggestions.taskId, ids.taskId))
+    .orderBy(aiSuggestions.createdAt, aiSuggestions.id);
+  const steps = await db.select().from(tasks).where(eq(tasks.parentTaskId, ids.taskId));
+  return { suggestions, steps: steps.length };
+}
+
+function saveForm(ids: AiIds): FormData {
+  const data = new FormData();
+  data.set("taskId", ids.taskId);
+  data.set("suggestionId", ids.suggestionId);
+  for (const [index, item] of SUGGESTED.entries()) {
+    data.append("title", item.title);
+    data.append("estimateMinutes", String(item.minutes));
+    data.append("deadlineDate", "");
+    data.append("deadlineTime", "");
+    data.append("suggestedIndex", String(index));
+  }
+  return data;
+}
+
+type AiAction = {
+  name: string;
+  /** Creates what the action needs for this owner, in the right state. */
+  fixture: (ownerId: string) => Promise<AiIds>;
+  run: (ids: AiIds) => Promise<string>;
+};
+
+const withTask = async (ownerId: string) => (await insertTask(ownerId)).id;
+
+const AI_ACTIONS: AiAction[] = [
+  {
+    name: "requestBreakdownAction",
+    fixture: async (owner) => ({ taskId: await withTask(owner), suggestionId: randomUUID() }),
+    run: (ids) => call(aiActions.requestBreakdownAction, { taskId: ids.taskId }),
+  },
+  {
+    name: "saveBreakdownAction",
+    fixture: async (owner) => {
+      const taskId = await withTask(owner);
+      return { taskId, suggestionId: (await insertSuggestion(owner, taskId)).id };
+    },
+    run: (ids) => outcome(() => aiActions.saveBreakdownAction(null, saveForm(ids))),
+  },
+  {
+    name: "discardBreakdownAction",
+    fixture: async (owner) => {
+      const taskId = await withTask(owner);
+      return { taskId, suggestionId: (await insertSuggestion(owner, taskId)).id };
+    },
+    run: (ids) => call(aiActions.discardBreakdownAction, { suggestionId: ids.suggestionId }),
+  },
+  {
+    name: "rateBreakdownAction",
+    fixture: async (owner) => {
+      const taskId = await withTask(owner);
+      const saved = await insertSuggestion(owner, taskId, {
+        outcome: "accepted",
+        itemsKept: SUGGESTED.length,
+        resolvedAt: new Date("2026-01-01T00:05:00Z"),
+      });
+      return { taskId, suggestionId: saved.id };
+    },
+    run: (ids) =>
+      call(aiActions.rateBreakdownAction, { suggestionId: ids.suggestionId, rating: "4", feedback: "Helpful" }),
+  },
+];
+
+describe.each(AI_ACTIONS)("$name", (action) => {
+  it.each(TASK_ACTORS)("as %s, on their own task", async (kind) => {
+    const setup = await actAs(kind);
+    try {
+      const ids = await action.fixture(setup.user?.id ?? (await insertUser(db)).id);
+      const before = await aiSnapshot(ids);
+      const mayDoIt = AI_OWNERS.includes(kind);
+
+      expect(await action.run(ids)).toBe(mayDoIt ? "ok" : NOT_ALLOWED);
+
+      const after = await aiSnapshot(ids);
+      if (mayDoIt) {
+        expect(JSON.stringify(after)).not.toBe(JSON.stringify(before));
+      } else {
+        // A refused request changed nothing: no suggestion recorded, none changed, no steps.
+        expect(after).toEqual(before);
+      }
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it.each(TASK_ACTORS)("as %s, on another student's task or suggestion", async (kind) => {
+    const setup = await actAs(kind);
+    try {
+      const stranger = await insertUser(db, { status: "active" });
+      const ids = await action.fixture(stranger.id);
+      const before = await aiSnapshot(ids);
+
+      const result = await action.run(ids);
+
+      // Someone who holds both keys is told "not found"; everyone else is stopped earlier, by the keys.
+      expect(result).toBe(AI_OWNERS.includes(kind) ? "fail:not_found" : NOT_ALLOWED);
+      expect(await aiSnapshot(ids)).toEqual(before);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as a student: ids that do not exist are 'not found'", async () => {
+    const setup = await actAs("student");
+    try {
+      expect(await action.run({ taskId: randomUUID(), suggestionId: randomUUID() })).toBe("fail:not_found");
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as admin: ids that do not exist give the same answer as any other refusal", async () => {
+    const setup = await actAs("admin");
+    try {
+      expect(await action.run({ taskId: randomUUID(), suggestionId: randomUUID() })).toBe(NOT_ALLOWED);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("as a student: bad ids are rejected as invalid input", async () => {
+    const setup = await actAs("student");
+    try {
+      expect(await action.run({ taskId: "not-a-uuid", suggestionId: "not-a-uuid" })).toBe("fail:invalid_input");
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+describe("AI-e: both keys are needed, one is not enough", () => {
+  async function without(roleKey: string, permissionKey: string) {
+    const grant = await grantRow(roleKey, permissionKey);
+    await db
+      .delete(rolePermissions)
+      .where(and(eq(rolePermissions.roleId, grant.roleId), eq(rolePermissions.permissionId, grant.permissionId)));
+    return async () => void (await db.insert(rolePermissions).values(grant));
+  }
+
+  it.each(["ai.use", "task.personal.manage"])("a student without %s is refused every AI action", async (missing) => {
+    const restoreKey = await without("student", missing);
+    const setup = await actAs("student");
+    try {
+      for (const action of AI_ACTIONS) {
+        const ids = await action.fixture(setup.user!.id);
+        const before = await aiSnapshot(ids);
+        expect(await action.run(ids), action.name).toBe(NOT_ALLOWED);
+        expect(await aiSnapshot(ids), action.name).toEqual(before);
+      }
+    } finally {
+      await setup.restore();
+      await restoreKey();
+    }
+  });
+});
+
+describe("tier 1: Admin never reaches a student's AI history", () => {
+  it("Admin is refused by every AI action on a student's task and suggestion, and nothing changes", async () => {
+    const student = await insertUser(db, { status: "active" });
+    const setup = await actAs("admin");
+    try {
+      for (const action of AI_ACTIONS) {
+        const ids = await action.fixture(student.id);
+        const before = await aiSnapshot(ids);
+        expect(await action.run(ids), action.name).toBe(NOT_ALLOWED);
+        expect(await aiSnapshot(ids), action.name).toEqual(before);
+      }
+    } finally {
+      await setup.restore();
+    }
+  });
+});
+
+describe("AI actions: the record rules, as the owner", () => {
+  it("a Done task cannot be broken down, and the model is never asked (no suggestion is recorded)", async () => {
+    const setup = await actAs("student");
+    try {
+      const task = await insertTask(setup.user!.id, {
+        status: "done",
+        startedAt: LONG_AGO,
+        completedAt: new Date("2026-01-05T00:00:00Z"),
+      });
+      expect(await call(aiActions.requestBreakdownAction, { taskId: task.id })).toBe("fail:task_done");
+      expect((await aiSnapshot({ taskId: task.id, suggestionId: "" })).suggestions).toHaveLength(0);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("a step cannot be broken down", async () => {
+    const setup = await actAs("student");
+    try {
+      const parent = await insertTask(setup.user!.id);
+      const step = await insertTask(setup.user!.id, { parentTaskId: parent.id, title: "A step" });
+      expect(await call(aiActions.requestBreakdownAction, { taskId: step.id })).toBe("fail:step_of_step");
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("asking twice in a row: the second is 'too soon' and records nothing", async () => {
+    const setup = await actAs("student");
+    try {
+      const first = await insertTask(setup.user!.id);
+      const second = await insertTask(setup.user!.id, { title: "Another task" });
+      expect(await call(aiActions.requestBreakdownAction, { taskId: first.id })).toBe("ok");
+      expect(await call(aiActions.requestBreakdownAction, { taskId: second.id })).toBe("fail:too_soon");
+      expect((await aiSnapshot({ taskId: second.id, suggestionId: "" })).suggestions).toHaveLength(0);
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("the whole round trip: ask, save exactly as suggested (accepted), then rate", async () => {
+    const setup = await actAs("student");
+    try {
+      const task = await insertTask(setup.user!.id);
+      const asked = await aiActions.requestBreakdownAction(null, form({ taskId: task.id }));
+      expect(asked?.ok).toBe(true);
+      if (!asked?.ok || !asked.data) return;
+
+      // Send the rows back exactly as received.
+      const data = new FormData();
+      data.set("taskId", task.id);
+      data.set("suggestionId", asked.data.suggestionId);
+      for (const [index, step] of asked.data.steps.entries()) {
+        data.append("title", step.title);
+        data.append("estimateMinutes", String(step.minutes));
+        data.append("deadlineDate", step.deadlineDate);
+        data.append("deadlineTime", step.deadlineTime);
+        data.append("suggestedIndex", String(index));
+      }
+      const saved = await aiActions.saveBreakdownAction(null, data);
+      expect(saved).toMatchObject({ ok: true, data: { outcome: "accepted", created: 4 } });
+
+      expect(
+        await call(aiActions.rateBreakdownAction, { suggestionId: asked.data.suggestionId, rating: "5", feedback: "" }),
+      ).toBe("ok");
+      const [row] = await db.select().from(aiSuggestions).where(eq(aiSuggestions.id, asked.data.suggestionId));
+      expect(row).toMatchObject({ outcome: "accepted", itemsKept: 4, rating: 5, model: "fake-model" });
+    } finally {
+      await setup.restore();
+    }
+  });
+
+  it("a refused step list names the step: 'Step 2: Enter a title.'", async () => {
+    const setup = await actAs("student");
+    try {
+      const task = await insertTask(setup.user!.id);
+      const suggestion = await insertSuggestion(setup.user!.id, task.id);
+      const data = saveForm({ taskId: task.id, suggestionId: suggestion.id });
+      const titles = data.getAll("title");
+      data.delete("title");
+      data.append("title", String(titles[0]));
+      data.append("title", "");
+      data.append("title", String(titles[2]));
+      const result = await aiActions.saveBreakdownAction(null, data);
+      expect(result).toMatchObject({ ok: false, error: { code: "invalid_input", message: "Step 2: Enter a title." } });
     } finally {
       await setup.restore();
     }

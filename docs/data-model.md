@@ -382,7 +382,7 @@ The size cap (`MAX_FILE_SIZE_BYTES`, 10 MB) and the count cap (20) are settings 
 | timeframe_start | date, opt | First day of the week or month. Required for summaries |
 | model | text, req | e.g. llama3.2:3b |
 | prompt_version | text, req | |
-| input_snapshot | jsonb, req | What was sent |
+| input_snapshot | jsonb, req | What was sent (title, description as cut for the prompt, existing step titles, today, deadline, time zone). For a breakdown, once the answer is valid, also `suggested`: the list the student was shown (title, minutes, due date), which "accepted" and "edited" are decided against |
 | output_raw | text, opt | What came back |
 | output_valid | boolean, req | Did it pass validation |
 | latency_ms | int, opt | |

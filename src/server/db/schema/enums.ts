@@ -42,3 +42,15 @@ export const TASK_EVENT_TYPES = [
   "start_backfilled",
 ] as const;
 export const taskEventTypeEnum = pgEnum("task_event_type", TASK_EVENT_TYPES);
+
+// AI suggestions (docs/data-model.md §8).
+export const AI_SUGGESTION_KINDS = ["breakdown", "summary"] as const;
+export const aiSuggestionKindEnum = pgEnum("ai_suggestion_kind", AI_SUGGESTION_KINDS);
+
+export const AI_TIMEFRAMES = ["week", "month"] as const;
+export const aiTimeframeEnum = pgEnum("ai_timeframe", AI_TIMEFRAMES);
+
+// pending: waiting for the student. accepted: saved exactly as suggested. edited: saved with any change.
+// discarded: closed without saving. failed: invalid twice, timed out, or Ollama off (docs/slices/slice-4-plan.md AI-f).
+export const AI_OUTCOMES = ["pending", "accepted", "edited", "discarded", "failed"] as const;
+export const aiOutcomeEnum = pgEnum("ai_outcome", AI_OUTCOMES);

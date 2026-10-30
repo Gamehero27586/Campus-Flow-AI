@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { MAX_SUBTASKS_PER_TASK } from "@/config/limits";
 import { runRules } from "@/server/policies/evaluate-record";
 import {
+  addStepsRules,
   addSubtaskRules,
   backfillStartRules,
+  breakdownRules,
   changeDeadlineRules,
   completeRules,
   deleteRules,
@@ -79,6 +81,24 @@ function verdict(rules: Rules, record: TaskTarget, user = owner): string {
 type Row = [name: string, rules: Rules, record: TaskTarget, expected: string];
 
 const rows: Row[] = [
+  // ---- add several steps at once (saving an AI breakdown)
+  ["add 4 steps: room for them", addStepsRules(4), task({ stepCount: MAX_SUBTASKS_PER_TASK - 4 }), "allow"],
+  ["add 4 steps: one too many", addStepsRules(4), task({ stepCount: MAX_SUBTASKS_PER_TASK - 3 }), "too_many_steps"],
+  ["add 4 steps: Done parent", addStepsRules(4), task(done), "parent_done"],
+  ["add 4 steps: deleted", addStepsRules(4), task(deleted), "task_deleted"],
+  ["add 4 steps: onto a step", addStepsRules(4), step(), "step_of_step"],
+
+  // ---- ask the AI to break a task down (AI-a, AI-b)
+  ["breakdown: a To Do task", breakdownRules(), task(), "allow"],
+  ["breakdown: in progress", breakdownRules(), task({ status: "in_progress" }), "allow"],
+  ["breakdown: it already has steps", breakdownRules(), task({ stepCount: 10 }), "allow"],
+  ["breakdown: exactly room for 3 more", breakdownRules(), task({ stepCount: MAX_SUBTASKS_PER_TASK - 3 }), "allow"],
+  ["breakdown: room for only 2", breakdownRules(), task({ stepCount: MAX_SUBTASKS_PER_TASK - 2 }), "too_many_steps"],
+  ["breakdown: full", breakdownRules(), task({ stepCount: MAX_SUBTASKS_PER_TASK }), "too_many_steps"],
+  ["breakdown: Done", breakdownRules(), task(done), "task_done"],
+  ["breakdown: deleted", breakdownRules(), task(deleted), "task_deleted"],
+  ["breakdown: a step", breakdownRules(), step(), "step_of_step"],
+
   // ---- start
   ["start: To Do task", startRules(), task(), "allow"],
   ["start: a To Do step", startRules(), step(), "allow"],
@@ -243,6 +263,8 @@ const everyRuleSet: Array<[string, Rules, TaskTarget]> = [
   ["update step", updateSubtaskRules(), step()],
   ["change deadline", changeDeadlineRules(), task()],
   ["add step", addSubtaskRules(), task()],
+  ["add several steps", addStepsRules(4), task()],
+  ["break down with AI", breakdownRules(), task()],
   ["delete", deleteRules(), task()],
   ["restore", restoreRules(), task(deleted)],
 ];

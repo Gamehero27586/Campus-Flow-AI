@@ -56,6 +56,13 @@ const ACTIONS: Record<string, Record<string, ActionSpec>> = {
     deleteTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
     restoreTaskAction: { check: "authorizeRecord", keys: ["task.personal.manage"] },
   },
+  // AI breakdown (rule AI-e): BOTH keys, ai.use and task.personal.manage. Suggestions are tier 1 (owner only).
+  "app/(app)/tasks/ai-actions.ts": {
+    requestBreakdownAction: { check: "authorizeRecord", keys: ["ai.use", "task.personal.manage"] },
+    saveBreakdownAction: { check: "authorizeRecord", keys: ["ai.use", "task.personal.manage"] },
+    discardBreakdownAction: { check: "authorizeRecord", keys: ["ai.use", "task.personal.manage"] },
+    rateBreakdownAction: { check: "authorizeRecord", keys: ["ai.use", "task.personal.manage"] },
+  },
   "app/(app)/settings/actions.ts": {
     updateTimezoneAction: { check: "authorize", keys: [] }, // any active account
     changePasswordAction: { check: "authorize", keys: [] },

@@ -29,7 +29,8 @@ export default defineConfig({
     command: `npm run start -- -p ${PORT}`,
     url: `${BASE_URL}/sign-in`,
     // Better Auth only accepts requests from the address it is told about.
-    env: { BETTER_AUTH_URL: BASE_URL },
+    // AI_FAKE_MODEL swaps Ollama for a fixed fake, so the AI flow does not depend on a graphics card.
+    env: { BETTER_AUTH_URL: BASE_URL, AI_FAKE_MODEL: "yes" },
     reuseExistingServer: false,
     timeout: 120_000,
   },

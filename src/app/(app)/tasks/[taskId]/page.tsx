@@ -3,8 +3,11 @@ import { notFound } from "next/navigation";
 import { CalendarIcon, ChevronRightIcon, ClockIcon } from "lucide-react";
 import { formatDeadline, isOverdue, toLocalDateTime } from "@/lib/time";
 import { taskIdSchema } from "@/lib/schemas/tasks";
+import { getAiHealth } from "@/server/ai/health";
 import { requirePermission } from "@/server/policies/authorize";
+import { breakdownRoomBlock } from "@/server/tasks/policy";
 import { getMyTask, type StepDetail } from "@/server/tasks/queries";
+import { AiBreakdown, type Availability } from "@/app/(app)/tasks/ai-breakdown";
 import { BackLink } from "@/app/(app)/tasks/back-link";
 import { StartPromptHost } from "@/app/(app)/tasks/start-prompt";
 import {
@@ -30,7 +33,7 @@ import {
 import { localDateOf, startWindow } from "@/app/(app)/tasks/view";
 
 export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">) {
-  const { user } = await requirePermission("task.personal.manage");
+  const { user, permissions } = await requirePermission("task.personal.manage");
 
   // Not a task id, not yours, or not a personal task: all the same answer, "not found".
   const parsedId = taskIdSchema.safeParse((await params).taskId);
@@ -46,6 +49,24 @@ export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">)
   const openSteps = task.steps.filter((step) => step.status !== "done").length;
   const deadlineLocal = task.deadline ? toLocalDateTime(task.deadline, timeZone) : null;
 
+  // "Break this down" (rules AI-a and AI-b): your own top-level task that is not deleted or Done, for a role that
+  // holds ai.use. The button is shown but disabled, with the reason, when the AI is off or the task is too full.
+  // The server checks all of it again when the button is pressed.
+  let aiAvailability: Availability | null = null;
+  if (permissions.has("ai.use") && !isStep && !deleted && task.status !== "done") {
+    const roomBlock = breakdownRoomBlock(task.steps.length);
+    if (roomBlock) {
+      aiAvailability = { available: false, reason: roomBlock.message };
+    } else if (!(await getAiHealth()).online) {
+      aiAvailability = {
+        available: false,
+        reason: "The AI is not running right now. You can still add steps yourself.",
+      };
+    } else {
+      aiAvailability = { available: true };
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {/* A fixed label: a long task title would overflow a button (the title is shown under it). */}
@@ -55,7 +76,10 @@ export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">)
 
       <header className="space-y-2">
         {isStep && task.parent ? (
-          <p className="text-sm text-muted-foreground">Step of: {task.parent.title}</p>
+          <p className="text-sm text-muted-foreground">
+            Step of: {task.parent.title}
+            {task.source === "ai_breakdown" ? " · AI suggested" : ""}
+          </p>
         ) : null}
         <h1 className="text-2xl font-semibold break-words text-brand">{task.title}</h1>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -200,6 +224,14 @@ export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">)
               ? ` (${task.steps.length - openSteps} of ${task.steps.length} done)`
               : ""}
           </h2>
+          {aiAvailability ? (
+            <AiBreakdown
+              taskId={task.id}
+              timeZone={timeZone}
+              stepCount={task.steps.length}
+              availability={aiAvailability}
+            />
+          ) : null}
           {task.steps.length === 0 ? (
             <p className="text-sm text-muted-foreground">No steps yet.</p>
           ) : (
@@ -268,6 +300,9 @@ function StepRow({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <StatusBadge status={step.status} />
           {overdue ? <OverdueBadge /> : null}
+          {step.source === "ai_breakdown" ? (
+            <span className="rounded border border-border px-1.5 py-0.5 text-xs font-medium">AI suggested</span>
+          ) : null}
           {step.deadline ? <span>Due {formatDeadline(step.deadline, timeZone)}</span> : null}
           {step.estimateMinutes ? <span>{step.estimateMinutes} min</span> : null}
         </div>

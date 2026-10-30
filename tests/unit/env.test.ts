@@ -76,3 +76,38 @@ describe("src/env.ts refuses to serve the test database on a public address", ()
     expect((error as Error).message).not.toMatch(/postgres|password=|secret/i);
   });
 });
+
+// AI_FAKE_MODEL replaces the model with a fixed fake for the browser tests. It must never be possible in a
+// real deployment, so it is refused unless the TEST database marker is on.
+describe("src/env.ts: AI_FAKE_MODEL is a test-database-only switch", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function loadWith(fake: string, marker: string) {
+    vi.stubEnv("AI_FAKE_MODEL", fake);
+    vi.stubEnv("DEV_DB_RESET_ALLOWED", marker);
+    vi.resetModules();
+    return import("@/env");
+  }
+
+  it("is refused without the test database marker", async () => {
+    await expect(loadWith("yes", "")).rejects.toThrow(/AI_FAKE_MODEL can only be used with the test database/);
+  });
+
+  it("is refused with any value other than yes", async () => {
+    await expect(loadWith("true", "yes")).rejects.toThrow(/AI_FAKE_MODEL must be "yes"/);
+  });
+
+  it("is allowed with the test database marker", async () => {
+    const { env } = await loadWith("yes", "yes");
+    expect(env.AI_FAKE_MODEL).toBe("yes");
+  });
+
+  it("is off by default", async () => {
+    vi.resetModules();
+    const { env } = await import("@/env");
+    expect(env.AI_FAKE_MODEL).toBeUndefined();
+  });
+});

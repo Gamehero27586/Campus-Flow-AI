@@ -66,7 +66,7 @@ campus-flow-ai/
       (onboarding)/         welcome (username and optional requested role), pending
       (app)/                Signed-in shell (layout with navigation)
         dashboard/
-        tasks/              page.tsx (list), new/ (the form as a page), [taskId]/ (detail), deleted/; actions.ts (the 12 server actions); client pieces next to them: task-forms, task-buttons, start-prompt, task-card, task-badges, use-action-form
+        tasks/              page.tsx (list), new/ (the form as a page), [taskId]/ (detail), deleted/; actions.ts (the 12 task server actions), ai-actions.ts (the 4 AI breakdown actions), ai-breakdown.tsx (the button, review panel and rating); client pieces next to them: task-forms, task-buttons, start-prompt, task-card, task-badges, use-action-form
         tracker/
         classes/            join/, [classId]/ (assignments/, members/, tracker/)
         teams/              [teamId]/
@@ -98,7 +98,7 @@ campus-flow-ai/
       files/                (same four files)
       admin/                (same four files: users, roles, permissions, transfers, reset links)
       metrics/              definitions.ts, queries.ts, types.ts
-      ai/                   client.ts, breakdown.ts, summary.ts, schemas.ts, prompts/, queue.ts, warmup.ts
+      ai/                   client.ts, runtime.ts, breakdown.ts, summary.ts, schemas.ts, prompts/, queue.ts, dates.ts, health.ts, warmup.ts, policy.ts, queries.ts, commands.ts, fake-client.ts (test switch only)
 ```
 
 **`proxy.ts` matcher** excludes `/api/auth`, `/api/uploads`, `/api/files`, `/_next` and static files. **[Verify]** the matcher syntax in Slice 0.

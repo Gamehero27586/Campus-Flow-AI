@@ -4,3 +4,4 @@ export * from "./access";
 export * from "./auth";
 export * from "./audit";
 export * from "./tasks";
+export * from "./ai";
