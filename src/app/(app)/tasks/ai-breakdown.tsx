@@ -3,13 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { LoaderCircleIcon, PlusIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
+import { LoaderCircleIcon, PlusIcon, SparklesIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  AI_FEEDBACK_MAX_LENGTH,
   MAX_SUBTASKS_PER_TASK,
   TASK_DATE_MAX_YEAR,
   TASK_DATE_MIN_YEAR,
@@ -19,14 +17,13 @@ import {
 } from "@/config/limits";
 import {
   discardBreakdownAction,
-  rateBreakdownAction,
   requestBreakdownAction,
   saveBreakdownAction,
   type BreakdownView,
 } from "@/app/(app)/tasks/ai-actions";
 
-// "Break this down" (docs/slices/slice-4-plan.md 4d): the coral button, the loading state, the review panel and
-// the optional rating. Everything the AI wrote is shown as plain text and nothing is saved until the student
+// "Break this down" (docs/slices/slice-4-plan.md 4d): the coral button, the loading state and the review panel.
+// Rating a saved breakdown is on the task page (breakdown-history.tsx), any time. Everything the AI wrote is shown as plain text and nothing is saved until the student
 // presses "Save steps". The server decides everything: this panel only collects the student's edits.
 
 const DATE_MIN = `${TASK_DATE_MIN_YEAR}-01-01`;
@@ -48,8 +45,7 @@ type Phase =
   | { kind: "idle" }
   | { kind: "asking" }
   | { kind: "failed"; message: string }
-  | { kind: "review"; suggestionId: string; rows: Row[] }
-  | { kind: "saved"; suggestionId: string };
+  | { kind: "review"; suggestionId: string; rows: Row[] };
 
 function rowsFrom(view: BreakdownView): Row[] {
   return view.steps.map((step, index) => ({
@@ -138,7 +134,8 @@ export function AiBreakdown({
           roomForRows={Math.max(0, MAX_SUBTASKS_PER_TASK - stepCount)}
           timeZone={timeZone}
           onSaved={() => {
-            setPhase({ kind: "saved", suggestionId: phase.suggestionId });
+            // The new steps and the breakdown (with its stars) appear on the page after the refresh.
+            setPhase({ kind: "idle" });
             router.refresh();
           }}
           onDiscarded={() => setPhase({ kind: "idle" })}
@@ -146,9 +143,6 @@ export function AiBreakdown({
         />
       ) : null}
 
-      {phase.kind === "saved" ? (
-        <RatingPrompt suggestionId={phase.suggestionId} onDone={() => setPhase({ kind: "idle" })} />
-      ) : null}
     </div>
   );
 }
@@ -351,86 +345,6 @@ function ReviewPanel({
         </Button>
         <Button variant="secondary" onClick={discard} disabled={working}>
           {discarding ? "Discarding..." : "Discard"}
-        </Button>
-      </div>
-    </section>
-  );
-}
-
-// ---- The optional rating (AI-h) -----------------------------------------------------------------------
-
-function RatingPrompt({ suggestionId, onDone }: { suggestionId: string; onDone: () => void }) {
-  const [rating, setRating] = useState(0);
-  const [feedback, setFeedback] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function send() {
-    setError(null);
-    const formData = new FormData();
-    formData.set("suggestionId", suggestionId);
-    formData.set("rating", rating === 0 ? "" : String(rating));
-    formData.set("feedback", feedback);
-    startTransition(async () => {
-      const result = await rateBreakdownAction(null, formData);
-      if (!result) return;
-      if (!result.ok) {
-        setError(result.fieldErrors?.rating?.[0] ?? result.error.message);
-        return;
-      }
-      if (result.message) toast.success(result.message);
-      onDone();
-    });
-  }
-
-  return (
-    <section aria-labelledby="ai-rating-heading" className="space-y-3 rounded-lg border bg-card p-4">
-      <h3 id="ai-rating-heading" className="font-medium">
-        How useful was this breakdown? (optional)
-      </h3>
-      <fieldset className="space-y-1">
-        <legend className="sr-only">Rating from 1 to 5 stars</legend>
-        <div className="flex flex-wrap gap-2">
-          {[1, 2, 3, 4, 5].map((value) => (
-            <label key={value} className="cursor-pointer">
-              <input
-                type="radio"
-                name="rating"
-                value={value}
-                checked={rating === value}
-                onChange={() => setRating(value)}
-                className="peer sr-only"
-              />
-              <span className="inline-flex h-9 items-center gap-1 rounded-lg border border-input px-3 text-sm peer-checked:border-brand peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50">
-                <StarIcon className="size-4" aria-hidden="true" />
-                <span className="sr-only">{value === 1 ? "1 star" : `${value} stars`}</span>
-                <span aria-hidden="true">{value}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      <div className="space-y-1.5">
-        <Label htmlFor="ai-feedback">Comment (optional)</Label>
-        <Textarea
-          id="ai-feedback"
-          value={feedback}
-          maxLength={AI_FEEDBACK_MAX_LENGTH}
-          rows={2}
-          onChange={(event) => setFeedback(event.target.value)}
-        />
-      </div>
-      {error ? (
-        <p role="alert" className="text-sm font-medium text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={send} disabled={pending || (rating === 0 && feedback.trim() === "")}>
-          {pending ? "Sending..." : "Send"}
-        </Button>
-        <Button variant="secondary" onClick={onDone} disabled={pending}>
-          Skip
         </Button>
       </div>
     </section>

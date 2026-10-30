@@ -4,10 +4,12 @@ import { CalendarIcon, ChevronRightIcon, ClockIcon } from "lucide-react";
 import { formatDeadline, isOverdue, toLocalDateTime } from "@/lib/time";
 import { taskIdSchema } from "@/lib/schemas/tasks";
 import { getAiHealth } from "@/server/ai/health";
+import { listMySavedBreakdowns } from "@/server/ai/queries";
 import { requirePermission } from "@/server/policies/authorize";
 import { breakdownRoomBlock } from "@/server/tasks/policy";
 import { getMyTask, type StepDetail } from "@/server/tasks/queries";
 import { AiBreakdown, type Availability } from "@/app/(app)/tasks/ai-breakdown";
+import { BreakdownHistory } from "@/app/(app)/tasks/breakdown-history";
 import { BackLink } from "@/app/(app)/tasks/back-link";
 import { StartPromptHost } from "@/app/(app)/tasks/start-prompt";
 import {
@@ -52,6 +54,20 @@ export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">)
   // "Break this down" (rules AI-a and AI-b): your own top-level task that is not deleted or Done, for a role that
   // holds ai.use. The button is shown but disabled, with the reason, when the AI is off or the task is too full.
   // The server checks all of it again when the button is pressed.
+  // The saved breakdowns of this task, each with its own rating that can be set or changed any time (AI-h).
+  const savedBreakdowns =
+    permissions.has("ai.use") && !isStep
+      ? (await listMySavedBreakdowns(user, task.id)).map((item) => ({
+          id: item.id,
+          savedAt: formatDeadline(item.savedAt, timeZone),
+          outcome: item.outcome,
+          itemsSuggested: item.itemsSuggested,
+          itemsKept: item.itemsKept,
+          rating: item.rating,
+          feedback: item.feedback,
+        }))
+      : [];
+
   let aiAvailability: Availability | null = null;
   if (permissions.has("ai.use") && !isStep && !deleted && task.status !== "done") {
     const roomBlock = breakdownRoomBlock(task.steps.length);
@@ -259,6 +275,8 @@ export default async function TaskPage({ params }: PageProps<"/tasks/[taskId]">)
           ) : null}
         </section>
       ) : null}
+
+      <BreakdownHistory items={savedBreakdowns} />
 
       <StartPromptHost />
     </div>

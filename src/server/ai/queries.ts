@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { db } from "@/server/db/client";
 import { aiSuggestions, tasks } from "@/server/db/schema";
@@ -76,3 +76,54 @@ export async function findBreakdownInput(
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
   return { ...task, existingStepTitles: steps.map((step) => step.title) };
 }
+
+/** One saved breakdown of a task, with its rating, for the task page. */
+export type SavedBreakdown = {
+  id: string;
+  outcome: "accepted" | "edited";
+  itemsSuggested: number | null;
+  itemsKept: number | null;
+  rating: number | null;
+  feedback: string | null;
+  savedAt: Date;
+};
+
+/**
+ * The breakdowns of one of the user's own tasks whose steps were saved (accepted or edited), newest first, so each
+ * can be rated or re-rated at any time (AI-h). Scoped to the user in the query: AI history is tier 1.
+ */
+export async function listSavedBreakdowns(
+  executor: Executor,
+  user: CurrentUser,
+  taskId: string,
+): Promise<SavedBreakdown[]> {
+  const rows = await executor
+    .select({
+      id: aiSuggestions.id,
+      outcome: aiSuggestions.outcome,
+      itemsSuggested: aiSuggestions.itemsSuggested,
+      itemsKept: aiSuggestions.itemsKept,
+      rating: aiSuggestions.rating,
+      feedback: aiSuggestions.feedbackText,
+      resolvedAt: aiSuggestions.resolvedAt,
+    })
+    .from(aiSuggestions)
+    .where(
+      and(
+        eq(aiSuggestions.userId, user.id),
+        eq(aiSuggestions.taskId, taskId),
+        eq(aiSuggestions.kind, "breakdown"),
+        inArray(aiSuggestions.outcome, ["accepted", "edited"]),
+      ),
+    )
+    .orderBy(desc(aiSuggestions.resolvedAt), desc(aiSuggestions.id));
+
+  return rows.flatMap((row) =>
+    row.resolvedAt && (row.outcome === "accepted" || row.outcome === "edited")
+      ? [{ ...row, outcome: row.outcome, savedAt: row.resolvedAt }]
+      : [],
+  );
+}
+
+/** listSavedBreakdowns on the real database, for the task page (pages never import the database). */
+export const listMySavedBreakdowns = (user: CurrentUser, taskId: string) => listSavedBreakdowns(db, user, taskId);

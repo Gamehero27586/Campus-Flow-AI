@@ -5,6 +5,7 @@ import type { BreakdownItemInput } from "@/lib/schemas/ai";
 import { resetNowForTests, setNowForTests, toLocalDateTime } from "@/lib/time";
 import { discardBreakdown, rateBreakdown, requestBreakdown, type BreakdownDeps } from "@/server/ai/commands";
 import { OllamaError, type ChatJsonRequest, type ChatJsonResponse } from "@/server/ai/client";
+import { listSavedBreakdowns } from "@/server/ai/queries";
 import { createAiQueue } from "@/server/ai/queue";
 import type { CurrentUser } from "@/server/auth/current-user";
 import { aiSuggestions, taskEvents, tasks } from "@/server/db/schema";
@@ -834,6 +835,74 @@ describe("rateBreakdown (AI-h)", () => {
     const { suggestionId } = await savedSuggestion(owner);
     expect(await rateBreakdown(stranger, { suggestionId, rating: 1, feedback: null })).toMatchObject({
       error: { code: "not_found" },
+    });
+  });
+});
+
+// ---- The saved breakdowns of a task (for rating at any time) -----------------------------------------
+
+describe("listSavedBreakdowns (AI-h: rate or re-rate any time)", () => {
+  const OTHER_STEPS = {
+    steps: [
+      { title: "Collect the sources", minutes: 40 },
+      { title: "Write the first draft", minutes: 80 },
+      { title: "Proofread the draft", minutes: 25 },
+    ],
+  };
+
+  it("lists only the actor's saved (accepted or edited) breakdowns of this task, newest first, with their ratings", async () => {
+    const user = await newStudent();
+    const taskId = await newTask(user);
+
+    const first = await suggest(user, taskId);
+    setNowForTests(new Date(T0.getTime() + 60_000));
+    await createStepsFromBreakdown(user, { taskId, suggestionId: first.suggestionId, items: asItems(first.steps) });
+    await rateBreakdown(user, { suggestionId: first.suggestionId, rating: 5, feedback: "Great" });
+
+    const second = await suggest(user, taskId, OTHER_STEPS);
+    setNowForTests(new Date(T0.getTime() + 120_000));
+    await createStepsFromBreakdown(user, {
+      taskId,
+      suggestionId: second.suggestionId,
+      items: asItems(second.steps).slice(0, 2),
+    });
+
+    // Not listed: a discarded one, a pending one, another task's, and another student's.
+    const discarded = await suggest(user, taskId, { steps: OTHER_STEPS.steps.map((s) => ({ ...s, title: `${s.title} again` })) });
+    await discardBreakdown(user, { suggestionId: discarded.suggestionId });
+    await suggest(user, taskId, { steps: OTHER_STEPS.steps.map((s) => ({ ...s, title: `${s.title} later` })) });
+    const elsewhere = await newTask(user, { title: "Another task" });
+    const elsewhereSuggestion = await suggest(user, elsewhere);
+    await createStepsFromBreakdown(user, {
+      taskId: elsewhere,
+      suggestionId: elsewhereSuggestion.suggestionId,
+      items: asItems(elsewhereSuggestion.steps),
+    });
+
+    const list = await listSavedBreakdowns(db, user, taskId);
+    expect(list.map((item) => item.id)).toEqual([second.suggestionId, first.suggestionId]);
+    expect(list[0]).toMatchObject({ outcome: "edited", itemsSuggested: 3, itemsKept: 2, rating: null, feedback: null });
+    expect(list[0].savedAt).toEqual(new Date(T0.getTime() + 120_000));
+    expect(list[1]).toMatchObject({ outcome: "accepted", itemsKept: 4, rating: 5, feedback: "Great" });
+
+    // Someone else sees none of it, even for the same task id.
+    const stranger = await newStudent();
+    expect(await listSavedBreakdowns(db, stranger, taskId)).toEqual([]);
+  });
+
+  it("a rating can be changed later, and the list shows the new one", async () => {
+    const user = await newStudent();
+    const taskId = await newTask(user);
+    const suggestion = await suggest(user, taskId);
+    await createStepsFromBreakdown(user, { taskId, suggestionId: suggestion.suggestionId, items: asItems(suggestion.steps) });
+
+    expect((await listSavedBreakdowns(db, user, taskId))[0]).toMatchObject({ rating: null });
+    await rateBreakdown(user, { suggestionId: suggestion.suggestionId, rating: 2, feedback: null });
+    expect((await listSavedBreakdowns(db, user, taskId))[0]).toMatchObject({ rating: 2 });
+    await rateBreakdown(user, { suggestionId: suggestion.suggestionId, rating: 4, feedback: "Better than I thought" });
+    expect((await listSavedBreakdowns(db, user, taskId))[0]).toMatchObject({
+      rating: 4,
+      feedback: "Better than I thought",
     });
   });
 });

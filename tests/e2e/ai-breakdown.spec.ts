@@ -58,13 +58,27 @@ test("break a task down: edit the suggested steps, save them, rate, wait, discar
   await shot(student, "ai-03-saved");
 
   // --- The optional rating --------------------------------------------------------------------------
-  const rating = student.getByRole("region", { name: /How useful was this breakdown/ });
-  await expect(rating).toBeVisible();
+  // The saved breakdown stays on the task page with its own stars, so it can be rated now or any time later.
+  await expect(student.getByRole("heading", { name: "AI breakdowns" })).toBeVisible();
+  const rating = student.getByRole("group", { name: /Breakdown saved/ });
+  await expect(rating).toHaveCount(1);
+  await expect(rating.getByText(/Saved with your changes\. 3 of 4 suggested steps kept\. Not rated yet\./)).toBeVisible();
+  await expect(rating.getByRole("button", { name: "Save rating" })).toBeDisabled(); // nothing chosen yet
   await rating.getByRole("radio", { name: "4 stars" }).check({ force: true });
   await rating.getByLabel("Comment (optional)").fill("A good start");
-  await rating.getByRole("button", { name: "Send" }).click();
+  await rating.getByRole("button", { name: "Save rating" }).click();
   await expect(student.getByText("Thanks for the feedback.")).toBeVisible();
-  await expect(rating).toHaveCount(0);
+
+  // Change the rating later: the button now says "Update rating", and the new value survives a reload.
+  await expect(rating.getByRole("button", { name: "Update rating" })).toBeDisabled(); // nothing changed yet
+  await rating.getByRole("radio", { name: "5 stars" }).check({ force: true });
+  await rating.getByRole("button", { name: "Update rating" }).click();
+  // While saving the button says "Saving..."; it is "Update rating" and disabled again once the server has it.
+  await expect(rating.getByRole("button", { name: "Update rating" })).toBeDisabled();
+  await student.reload();
+  const reloaded = student.getByRole("group", { name: /Breakdown saved/ });
+  await expect(reloaded.getByRole("radio", { name: "5 stars" })).toBeChecked();
+  await expect(reloaded.getByLabel("Comment (optional)")).toHaveValue("A good start");
 
   // --- A second suggestion, after the 10-second pause between one person's requests ---------------
   // (Being told to wait is tested in the unit and permission tests; screens here are too slow to rely on it.)
