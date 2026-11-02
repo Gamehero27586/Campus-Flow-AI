@@ -240,9 +240,10 @@ export async function rateBreakdown(actor: CurrentUser, input: RateBreakdownInpu
     await tx
       .update(aiSuggestions)
       .set({
-        // A comment on its own must not wipe an earlier rating, and the other way round.
+        // The form always sends both current values (K3): an empty comment clears the comment,
+        // but stars can be changed, never removed, so a missing rating keeps the earlier one.
         ...(input.rating !== null ? { rating: input.rating } : {}),
-        ...(input.feedback !== null ? { feedbackText: input.feedback } : {}),
+        feedbackText: input.feedback,
       })
       .where(eq(aiSuggestions.id, suggestion.id));
     return ok({ suggestionId: suggestion.id });

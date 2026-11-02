@@ -12,6 +12,10 @@ import { BREAKDOWN_PROMPTS } from "@/server/ai/prompts";
 // anything but the cases to Ollama on this computer (docs/data-flows.md §8.3).
 //   npm run eval:ai                       every prompt version
 //   npm run eval:ai -- breakdown.v1       one version
+// To try another local model, set OLLAMA_MODEL (and OLLAMA_THINK=false for a model with a thinking mode) in the
+// shell for one run, for example in PowerShell: $env:OLLAMA_MODEL="qwen4b"; $env:OLLAMA_THINK="false"; npm run eval:ai
+// The file name then also names the model, so runs of different models never overwrite each other; the
+// default model (llama3.2:3b, thinking not set) keeps the plain name.
 
 type EvalCase = {
   id: string;
@@ -25,7 +29,20 @@ type EvalCase = {
 
 const ROOT = process.cwd();
 const baseUrl = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
-const model = process.env.OLLAMA_MODEL || "llama3.2:3b";
+const DEFAULT_MODEL = "llama3.2:3b";
+const model = process.env.OLLAMA_MODEL || DEFAULT_MODEL;
+const thinkSetting = process.env.OLLAMA_THINK || undefined;
+if (thinkSetting !== undefined && thinkSetting !== "true" && thinkSetting !== "false") {
+  console.error('OLLAMA_THINK must be "true", "false" or not set. Nothing was run.');
+  process.exit(1);
+}
+const think = thinkSetting === undefined ? undefined : thinkSetting === "true";
+const thinkLabel = think === undefined ? "" : think ? ", thinking on" : ", thinking off";
+// "qwen4b" -> "-qwen4b-no-think"; "huihui_ai/qwen3:4b" -> "-huihui_ai-qwen3-4b".
+const fileLabel =
+  model === DEFAULT_MODEL && think === undefined
+    ? ""
+    : `-${model.replace(/[^a-zA-Z0-9._]+/g, "-")}${think === undefined ? "" : think ? "-think" : "-no-think"}`;
 // A fixed seed makes a run repeatable, so two prompt versions (or two runs) can be compared. Only this script
 // sets it; the app does not.
 const EVAL_SEED = 42;
@@ -64,7 +81,7 @@ async function main() {
 
   let client: ReturnType<typeof createOllamaClient>;
   try {
-    client = createOllamaClient({ baseUrl, model });
+    client = createOllamaClient({ baseUrl, model, think });
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
@@ -82,7 +99,7 @@ async function main() {
   };
   const today = now().toISOString().slice(0, 10);
 
-  console.log(`Ollama ${health.version}, model ${model}.`);
+  console.log(`Ollama ${health.version}, model ${model}${thinkLabel}.`);
 
   for (const version of versions) {
     const prompt = BREAKDOWN_PROMPTS[version];
@@ -133,7 +150,7 @@ async function main() {
       `# AI breakdown evaluation: ${version}`,
       "",
       `- Date: ${today}`,
-      `- Model: ${model} (Ollama ${health.version})`,
+      `- Model: ${model} (Ollama ${health.version})${thinkLabel}`,
       `- Cases: ${total}, from eval/cases.json. Temperature 0, fixed seed ${EVAL_SEED}, context 4,096, one retry after an invalid answer.`,
       `- Cold start, from an unloaded model (not counted below): ${seconds(warmMs)}`,
       "- Run with the laptop plugged in so timings can be compared.",
@@ -173,7 +190,7 @@ async function main() {
       }
     }
 
-    const file = path.join(ROOT, "eval", "results", `${today}-${version}.md`);
+    const file = path.join(ROOT, "eval", "results", `${today}-${version}${fileLabel}.md`);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, lines.join("\n"));
     console.log(`\nWrote ${path.relative(ROOT, file)}: valid ${percent(validCount)}, average ${seconds(averageLatency)} per case.`);

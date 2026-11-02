@@ -66,7 +66,7 @@ campus-flow-ai/
       (onboarding)/         welcome (username and optional requested role), pending
       (app)/                Signed-in shell (layout with navigation)
         dashboard/
-        tasks/              page.tsx (list), new/ (the form as a page), [taskId]/ (detail), deleted/; actions.ts (the 12 task server actions), ai-actions.ts (the 4 AI breakdown actions), ai-breakdown.tsx (the button, review panel and rating); client pieces next to them: task-forms, task-buttons, start-prompt, task-card, task-badges, use-action-form
+        tasks/              page.tsx (list), new/ (the form as a page), [taskId]/ (detail), deleted/; actions.ts (the 12 task server actions), ai-actions.ts (the 4 AI breakdown actions), ai-breakdown.tsx (the button and review panel), breakdown-history.tsx (the saved breakdowns and their ratings); client pieces next to them: task-forms, task-buttons, start-prompt, task-card, task-badges, use-action-form
         tracker/
         classes/            join/, [classId]/ (assignments/, members/, tracker/)
         teams/              [teamId]/

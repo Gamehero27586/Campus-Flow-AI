@@ -234,3 +234,20 @@ describe("health and warm-up", () => {
     await expect(clientWith(offline).warm()).rejects.toMatchObject({ reason: "offline" });
   });
 });
+
+describe("chatJson: thinking (OLLAMA_THINK, for trying other models)", () => {
+  const bodyOf = (call: Call) => JSON.parse(String(call.init.body)) as Record<string, unknown>;
+
+  it("sends no think field when it is not set, so llama3.2:3b gets the same request as before", async () => {
+    const { fetchFn, calls } = fakeFetch(() => answerWith('{"steps":[]}'));
+    await clientWith(fetchFn).chatJson({ system: "SYS", user: "USER", schema });
+    expect(bodyOf(calls[0])).not.toHaveProperty("think");
+  });
+
+  it.each([false, true])("sends think: %s when it is set", async (think) => {
+    const { fetchFn, calls } = fakeFetch(() => answerWith('{"steps":[]}'));
+    const client = createOllamaClient({ baseUrl: "http://127.0.0.1:11434", model: "qwen4b", think, fetch: fetchFn });
+    await client.chatJson({ system: "SYS", user: "USER", schema });
+    expect(bodyOf(calls[0])).toMatchObject({ model: "qwen4b", think });
+  });
+});

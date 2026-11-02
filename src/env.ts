@@ -33,6 +33,9 @@ const envSchema = z.object({
   AI_FAKE_MODEL: optionalString,
   OLLAMA_URL: z.string().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b"),
+  // "false" or "true" turns thinking off or on, for models that have a thinking mode (for example Qwen3).
+  // Leave it unset for llama3.2:3b: then nothing is sent and the model behaves as before.
+  OLLAMA_THINK: optionalString,
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -56,6 +59,10 @@ if (parsed.data.DEV_DB_RESET_ALLOWED === "yes" && !isLocalAddress(parsed.data.BE
 // a production run, the tests) the switch is switched OFF here, once, so no other file can honour it by mistake.
 if (parsed.data.DEV_ALLOW_LAN !== undefined && parsed.data.DEV_ALLOW_LAN !== "yes") {
   throw new Error('DEV_ALLOW_LAN must be "yes" or not set.');
+}
+
+if (parsed.data.OLLAMA_THINK !== undefined && !["true", "false"].includes(parsed.data.OLLAMA_THINK)) {
+  throw new Error('OLLAMA_THINK must be "true", "false" or not set.');
 }
 
 if (parsed.data.AI_FAKE_MODEL !== undefined && parsed.data.AI_FAKE_MODEL !== "yes") {

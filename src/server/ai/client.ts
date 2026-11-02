@@ -19,6 +19,9 @@ import { isLocalAddress } from "@/lib/local-address";
 //   empty messages  loads the model (done_reason "load"), used by the warm-up
 //   GET /api/version  { version }
 //   model not installed: HTTP 404.
+//   think: true or false turns a thinking model's reasoning on or off (checked against the same page on
+//   31 Oct 2026; left out, the model uses its own default). Sent ONLY when OLLAMA_THINK is set, so
+//   llama3.2:3b, which has no thinking mode, gets exactly the request it always got.
 
 export type OllamaFailureReason =
   | "offline" // nothing is listening, or the connection failed
@@ -73,6 +76,11 @@ export type OllamaClientOptions = {
   /** Ollama's address: only localhost is accepted. */
   baseUrl: string;
   model: string;
+  /**
+   * Thinking on or off for a model that has a thinking mode (for example Qwen3). Undefined: the field is not
+   * sent at all and the model behaves as it always did. Set from OLLAMA_THINK, for trying other models.
+   */
+  think?: boolean;
   /** Replaceable so tests need no real server. */
   fetch?: typeof fetch;
 };
@@ -151,6 +159,7 @@ export function createOllamaClient(options: OllamaClientOptions) {
             ...(request.seed !== undefined ? { seed: request.seed } : {}),
           },
           keep_alive: AI_KEEP_ALIVE,
+          ...(options.think !== undefined ? { think: options.think } : {}),
         },
         request.timeoutMs ?? AI_CALL_TIMEOUT_MS,
       );

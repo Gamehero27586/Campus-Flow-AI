@@ -111,3 +111,31 @@ describe("src/env.ts: AI_FAKE_MODEL is a test-database-only switch", () => {
     expect(env.AI_FAKE_MODEL).toBeUndefined();
   });
 });
+
+// OLLAMA_THINK turns a thinking model's reasoning on or off. Unset, nothing changes for llama3.2:3b.
+describe("src/env.ts: OLLAMA_THINK", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function loadWith(think: string) {
+    vi.stubEnv("OLLAMA_THINK", think);
+    vi.resetModules();
+    return import("@/env");
+  }
+
+  it.each(["true", "false"])("accepts %s", async (value) => {
+    const { env } = await loadWith(value);
+    expect(env.OLLAMA_THINK).toBe(value);
+  });
+
+  it("is not set by default (an empty line counts as not set)", async () => {
+    const { env } = await loadWith("");
+    expect(env.OLLAMA_THINK).toBeUndefined();
+  });
+
+  it("refuses anything else", async () => {
+    await expect(loadWith("no")).rejects.toThrow(/OLLAMA_THINK must be "true", "false" or not set/);
+  });
+});

@@ -798,14 +798,22 @@ describe("rateBreakdown (AI-h)", () => {
     expect((await suggestionRows(taskId))[0]).toMatchObject({ rating: 4, feedbackText: "Good start" });
   });
 
-  it("a comment alone keeps an earlier rating, and a rating alone keeps an earlier comment", async () => {
+  it("a comment alone keeps an earlier rating, and a rating with no comment clears the comment (K3)", async () => {
     const user = await newStudent();
     const { taskId, suggestionId } = await savedSuggestion(user);
     await rateBreakdown(user, { suggestionId, rating: 5, feedback: null });
     await rateBreakdown(user, { suggestionId, rating: null, feedback: "Saved me time" });
     expect((await suggestionRows(taskId))[0]).toMatchObject({ rating: 5, feedbackText: "Saved me time" });
     await rateBreakdown(user, { suggestionId, rating: 3, feedback: null });
-    expect((await suggestionRows(taskId))[0]).toMatchObject({ rating: 3, feedbackText: "Saved me time" });
+    expect((await suggestionRows(taskId))[0]).toMatchObject({ rating: 3, feedbackText: null });
+  });
+
+  it("clearing the comment box removes the comment and keeps the stars (K3)", async () => {
+    const user = await newStudent();
+    const { taskId, suggestionId } = await savedSuggestion(user);
+    await rateBreakdown(user, { suggestionId, rating: 4, feedback: "A good start" });
+    await rateBreakdown(user, { suggestionId, rating: 4, feedback: null });
+    expect((await suggestionRows(taskId))[0]).toMatchObject({ rating: 4, feedbackText: null });
   });
 
   it("a pending, discarded or failed suggestion cannot be rated", async () => {

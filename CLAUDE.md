@@ -24,6 +24,14 @@ A final-year project: a Next.js web app where students, faculty and an admin man
 - The owner uses **Windows and PowerShell**. Give commands that work there.
 - At the end of Slices 1, 2 and 7, stop and suggest a security review in a separate session before merging.
 
+## Where the project is and how the work is split
+
+- **Roles:** the owner decides; Claude Sonnet writes the code; Claude Opus plans slices and reviews them in separate sessions. Opus's plans are in `docs/slices/slice-N-plan.md`, its reviews in `docs/reviews/slice-N[x]-opus-review.md`. Review items have IDs (for example K3, M-a): apply only the ones the owner has approved, and say which IDs you applied.
+- **Before starting work, read** the plan of the current slice and the newest review in `docs/reviews/` (its open items come first), then the "notes" section of the slice in `docs/decisions.md`. `decisions.md` §21 onward lists what is still open.
+- **Status (31 Oct 2026):** Slices 0 to 4 are built (Slice 4: AI breakdown with prompt `breakdown.v2`, chosen by the owner). Open from Slice 4: **K3** in `docs/reviews/slice-4-opus-review.md` §5 (a rating comment cannot be cleared), and scoring case 8 of the evaluation. **Next: Slice 5** (`docs/slices/slice-5-plan.md`): the owner must confirm rules M-a to M-j before 5a.
+- The owner tests on the laptop (`npm run test`, `npm run test:e2e` twice a minute apart, `npm audit`) and prefers short, plain explanations.
+- Update this section at the end of each slice.
+
 ## Stack and commands
 
 Next.js 16 App Router (`src/`), TypeScript strict, PostgreSQL (Neon, local fallback) via Drizzle with the **`pg` driver** (never `neon-http`), Better Auth, Tailwind and shadcn/ui, Zod, react-hook-form, Vitest and Playwright. Package manager: **npm**.
