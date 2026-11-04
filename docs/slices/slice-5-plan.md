@@ -1,6 +1,6 @@
 # Slice 5 plan: metrics, Growth Tracker (day and week), `seed:demo`
 
-Written 30 Oct 2026 by Claude (Opus) for Claude (Sonnet), after Slice 4. The owner reviews this plan before you start. `docs/decisions.md` wins if anything here disagrees with it; if you find a disagreement, stop and ask.
+Written 30 Oct 2026 by Claude (Opus) for Claude (Sonnet), after Slice 4. **Updated 4 Nov 2026:** the owner confirmed rules M-a to M-j (section 3), with one change to M-a, and asked for rotating waiting messages on the AI breakdown (part 4e). You may start. `docs/decisions.md` wins if anything here disagrees with it; if you find a disagreement, stop and ask.
 
 **Read first:** `CLAUDE.md` (metric rules: definitions only in `src/server/metrics/definitions.ts`, thresholds only in `src/config/`), `docs/data-flows.md` §2 (the timestamp rules every metric depends on), **§7 (the only metric definitions)** and §8.2 step 3, `docs/decisions.md` §8 and §17 to §20, `docs/data-model.md` (`users.is_seed`, `users.timezone`, `tasks`, "Not stored on purpose"), `docs/permissions.md` (`tracker.personal.view`; the personal Growth Tracker is tier 1), `docs/mvp-scope.md` §9, `docs/folder-structure.md` (`/tracker`, `server/metrics/`, `scripts/seed-demo.ts`), and `docs/reviews/slice-4-opus-review.md`. Git stays the owner's job: never run a git command that changes anything.
 
@@ -19,29 +19,29 @@ Written 30 Oct 2026 by Claude (Opus) for Claude (Sonnet), after Slice 4. The own
 
 **No migration is expected.** The metrics are computed, not stored (`data-model.md`, "Not stored on purpose"), and the existing index `tasks (assignee_id, deadline)` serves the main query. Do not add an index unless a query is measured slow; if you think one is needed, stop and show the numbers.
 
-**Estimate:** 30 to 45 hours.
+**Estimate:** 30 to 45 hours, plus 1 to 2 hours for the Slice 4 follow-up in 4e.
 
 ## 2. Prerequisites (owner)
 
-- Slice 4 committed and tagged.
-- A shared password for the simulated users, saved as `SEED_DEMO_PASSWORD` in `.env.local` (never in Git), so you can sign in as one of them during a demo.
+- Slice 4 committed and tagged. *(4 Nov 2026: committed as `c9d2f73`; the `slice-4-done` tag is still the owner's to add.)*
+- A shared password for the simulated users, saved as `SEED_DEMO_PASSWORD` in `.env.local` (never in Git), so you can sign in as one of them during a demo. *(Not set yet on 4 Nov 2026. Needed only from part 4c; if it is missing when you get there, stop and ask.)*
 
-## 3. Proposed rules (confirm before 5a)
+## 3. Rules (confirmed by the owner, 4 Nov 2026)
 
-The documents leave these open. They are Opus's recommendations; build **only after the owner confirms them**, then record them in `decisions.md`.
+The documents left these open. Opus proposed them; **the owner confirmed all ten on 4 Nov 2026**, M-a with a change (written into the row below) and the others as written, with the notes in the rows. Record them in `decisions.md` (section 8) before writing code.
 
-| # | Case | Proposed rule | Why |
+| # | Case | Rule | Why |
 |---|---|---|---|
-| M-a | What a trend compares | This timeframe against the **whole** previous one ("compared with last week"), including when this week is still running. The trend is shown only when **both** weeks have at least `TREND_MIN_COMPLETED_WEEK` (5) eligible tasks **completed inside the week** (by `as_of`). Otherwise: "Not enough finished tasks yet to compare (5 needed in both weeks)" | §7.3 says "completed eligible tasks" without saying which set; "finished inside the week" is what a student understands |
-| M-b | On time | `completed_at <= deadline`, exactly as written. A date-only deadline is 23:59:00, so finishing at 23:59:30 is late. This matches the "Overdue" label the task pages already show | Simple and consistent; one comparison everywhere |
-| M-c | Reopened and restored tasks in an ended week | The numbers follow the task's **current** state (latest `completed_at`, current deletion state). A task done on time, then reopened, stops counting as done in that ended week until it is done again. Change the sentence in §7.2 to: "An ended timeframe's numbers change only when one of its tasks is reopened, restored or deleted, or its deadline changes" | §2 keeps only the latest `completed_at`; rebuilding history from `task_events` would double the work for a rare case |
+| M-a | What a trend compares, and when it is shown | This timeframe against the **whole** previous one ("compared with last week"), including when this week is still running. A metric's trend needs a value in **both** weeks (for example, completion rate needs something due in both). Then, counting eligible tasks **finished inside each week** (by `as_of`): **both weeks 5 or more** (`TREND_MIN_COMPLETED_WEEK`): the trend as usual. **Either week 1 to 4:** the trend **with a caution line**, for example "Based on only 2 finished tasks this week, so this comparison may not mean much" (name the week or weeks that are short). **Either week 0:** no trend, "Nothing to compare yet: no tasks were finished last week". The constant keeps its name and value; it now marks "reliable", not "shown". The month view (Slice 9) will use the same rule with `TREND_MIN_COMPLETED_MONTH` (10). Change the Trend row of `data-flows.md` §7.3, which says "shown only when" | **Owner's change (4 Nov 2026):** show the comparison even with few tasks, but say it may be unreliable. Zero finished tasks leaves nothing to compare |
+| M-b | On time | `completed_at <= deadline`, exactly as written. A date-only deadline is 23:59:00, so finishing at 23:59:30 is late. This matches the "Overdue" label the task pages already show. **Do not change the stored time** (the owner considered 23:59:59 and kept 23:59:00, 4 Nov 2026) | Simple and consistent; one comparison everywhere |
+| M-c | Reopened and restored tasks in an ended week | The numbers follow the task's **current** state (latest `completed_at`, current deletion state). A task done on time, then reopened, stops counting as done in that ended week until it is done again. To be precise about "which week": completion and on-time stay with the week the task was **due** (done again after that week ended = not done for that week, like T6 in the fixture); time taken and estimate accuracy count in the week it was **finished again**. Change the sentence in §7.2 to: "An ended timeframe's numbers change only when one of its tasks is reopened, restored or deleted, or its deadline changes" | §2 keeps only the latest `completed_at`; rebuilding history from `task_events` would double the work for a rare case. Owner: "if a task had to be reopened it is not fully done yet" |
 | M-d | Active time and estimate accuracy | "Active time" is **calendar time from start to finish** (nights included), not effort. The screen says so: "Time from start to finish". Estimate accuracy (median of active ÷ estimate per category) is shown only for a category with at least `ESTIMATE_ACCURACY_MIN_TASKS` = **3** such tasks in the week, worded "Took about 2.0× your estimate". Category `other` is one group whatever its custom label | Honest labelling; a ratio from one or two tasks means nothing. (The owner's own test task has an estimate of 4,320 minutes, which shows students sometimes estimate calendar time, sometimes effort) |
 | M-e | Day view | Counts only (§7.3): **due today**, of those **done** (whenever they were done), of those **still open**, and **overdue** = not done, deadline already passed, **any** day. Deleted tasks are left out of the day view entirely (it is a to-do view, not history). Plus the bar "3 of 5 due today are done". Earlier days can be opened; for an ended day, "overdue" is as at the end of that day | Matches "3 of 5 due today are done"; a deleted task should not nag |
 | M-f | Which weeks and days can be opened | From the week (or day) the account was created up to the current one. A future week, an invalid date, or a date before the account existed goes to the current one. Week links use the Monday: `/tracker?week=2026-10-26`; any other date is moved to its Monday. Day: `/tracker?day=2026-10-30`. Validated with Zod | No empty future pages; links can be shared with yourself and bookmarked |
 | M-g | The plain-language summary | **In this slice: only the code-written part** (§8.2 step 3), shown when the week's due set has at least 3 tasks, for example "You finished 7 of the 9 tasks due this week (78%). 6 of them were on time. You moved deadlines 2 times." No model call and no `ai_suggestions` row; the model's suggestions and storing the summary are Slice 9 | Numbers stay code-only; the AI part keeps its own slice |
-| M-h | A small history chart | Below the tiles: the **completion rate of the last 8 ended weeks plus this one**, as simple bars with the numbers written on them ("7 of 9"). A week with nothing due shows "nothing due", not 0%. Plain HTML or SVG with theme tokens, no chart library | "See growth" is checkpoint A's promise; one picture tells it better than one trend number |
+| M-h | A small history chart | Below the tiles: the **completion rate of the last 8 ended weeks plus this one**, as simple bars with the numbers written on them ("7 of 9"). A week with nothing due shows "nothing due", not 0%. Plain HTML or SVG with theme tokens, no chart library. Make it look tidy (even bar widths, rounded tops, the theme's chart colours, a clear label for this week), but do not build more charts than this one and the day bar | "See growth" is checkpoint A's promise; one picture tells it better than one trend number. **Owner (4 Nov 2026):** more polished graphs, possibly with a chart library, later, once the website is fully up (section 5) |
 | M-i | `seed:demo` behaviour | Creates **4 simulated students** with about **12 weeks** of history ending at the moment it runs, from a fixed random seed (same data shape every run). **Runs once per database:** refuses if any `is_seed` user exists ("Simulated users already exist. On the test database: `npm run db:reset`, then seed again"), because `task_events` is append-only and seed rows cannot be removed cleanly. Allowed on the test database; on the live database only with `--live` typed explicitly. Run it the day before a demo so "this week" is full | Append-only history makes a re-runnable seed impossible without breaking that rule; the `--live` flag stops an accident |
-| M-j | Who and where | Route `/tracker` (name in the menu: **Growth**), key `tracker.personal.view` (Student by default; Faculty only if the Admin grants it, and then they see their own tasks). It always shows the **signed-in user's own** data: there is no user id anywhere in the URL or the queries' inputs. Admin can never hold the key (not eligible) | Tier 1 by construction, not by a check that could be forgotten |
+| M-j | Who and where | Route `/tracker` (name in the menu: **Growth**), key `tracker.personal.view` (Student by default; Faculty only if the Admin grants it, and then they see their own tasks). It always shows the **signed-in user's own** data: there is no user id anywhere in the URL or the queries' inputs. Admin can never hold the key (not eligible) **in this version** | Tier 1 by construction, not by a check that could be forgotten. **Owner (4 Nov 2026):** Admins get their own personal tasks and tracker later (section 5); nothing about that is built now |
 
 ## 4. What to build
 
@@ -56,7 +56,7 @@ The documents leave these open. They are Opus's recommendations; build **only af
   - `dayCounts(actor, localDate)`: one query.
   - Both take the user id **only** from the signed-in actor.
 - `src/server/metrics/summary.ts`: the code-written sentences (M-g), a pure function of `WeekMetrics`, tested. No model.
-- `src/lib/format-metrics.ts` (browser-safe): rates as whole percentages with the counts ("78%, 7 of 9"); durations as minutes under 90 minutes, hours under 48 hours, then days, one decimal at most; ratios as "2.0×"; trends in neutral words ("up 12 points from last week", "down 1.5 h"). No "good" or "bad" colour: for times, up is not clearly better or worse.
+- `src/lib/format-metrics.ts` (browser-safe): rates as whole percentages with the counts ("78%, 7 of 9"); durations as minutes under 90 minutes, hours under 48 hours, then days, one decimal at most; ratios as "2.0×"; trends in neutral words ("up 12 points from last week", "down 1.5 h", "same as last week"), plus the M-a caution line. No "good" or "bad" colour: for times, up is not clearly better or worse.
 
 **The hand-calculated fixture** (write it as `tests/integration/metrics-fixture.test.ts`; keep the table below as a comment at the top so the owner can explain it in the viva). User U, time zone Asia/Kolkata, all times local, all personal top-level tasks unless stated. Fixed clock: **now = Wed 4 Nov 2026 15:00**. Week W = Mon 26 Oct 00:00 to Mon 2 Nov 00:00 (ended). Current week C = Mon 2 Nov 00:00 to `as_of` Wed 4 Nov 15:00.
 
@@ -90,11 +90,12 @@ Expected values, worked out by hand:
 | Average overall time | Done inside W: T1 180, T2 1,560, T3 2,880, T4 6,000, T10 2,880 = 13,500 ÷ 5 = **2,700 min (45 h)** | T6 4,320, T13 2,040 = 6,360 ÷ 2 = **3,180 min (53 h)** |
 | Estimate accuracy | study: T1 2.0, T2 0.5, T10 2.0, median **2.0×** (3 tasks, shown); project: T4 only (T3 has no start), **not enough data** | none |
 | Rescheduling | (1 + 2) ÷ 8 = **0.375 moves per task** | 0 ÷ 2 = **0** |
-| Finished inside the week (for trends, M-a) | T1, T2, T3, T4, T10 = **5** | T6, T13 = **2**, so **no trend** for C |
+| Finished inside the week (for trends, M-a) | T1, T2, T3, T4, T10 = **5** | T6, T13 = **2**, so C's trends are shown **with the caution line** ("Based on only 2 finished tasks this week…") |
+| Trend of C against W | (none: W is compared with the week before it, which has no tasks, so "Nothing to compare yet") | completion **same as last week** (50% and 50%); on time **up 25 points** (100% against 75%); active time **same** (480 and 480 min); overall time **up 8 h** (3,180 against 2,700 min); deadline moves **down 0.375 per task** (0 against 0.375); estimate accuracy has no trend |
 
 Day view for Wed 4 Nov at 15:00: due today **1** (T15), done **0**, still open **1**, overdue **3** (T5, T12, T14; T8 is deleted so it is left out, M-e).
 
-**More tests, each with its own small hand-calculated example and a fixed clock** (§7.5): no tasks at all (every rate shows "no tasks were due", never 0% or NaN); a task without a deadline (never in the due set); each `deleted_reason` (the two assignment reasons by a direct insert once those tasks can exist; until then a `todo` test); a restored task; a reopened task done again late (`completed_at` is the latest, so it becomes late); the current week on a Wednesday (above); **a week containing a daylight-saving change** (user in Europe/London, week Mon 19 Oct 2026: the clocks go back on Sun 25 Oct, so the week is 169 hours; a task due Sun 25 Oct 23:30 London time is inside it, one due Mon 26 Oct 00:30 is not); a user in a time zone west of UTC (America/New_York) whose Monday starts on Monday at 04:00 or 05:00 UTC; a user who changed time zone (the weeks are recomputed in the new zone, accepted); the trend shown at exactly 5 and 5, hidden at 5 and 4; estimate accuracy at exactly 3 tasks and at 2; the history query returning 9 weeks with a "nothing due" week among them; and the day view for an ended day.
+**More tests, each with its own small hand-calculated example and a fixed clock** (§7.5): no tasks at all (every rate shows "no tasks were due", never 0% or NaN); a task without a deadline (never in the due set); each `deleted_reason` (the two assignment reasons by a direct insert once those tasks can exist; until then a `todo` test); a restored task; a reopened task done again late (`completed_at` is the latest, so it becomes late); the current week on a Wednesday (above); **a week containing a daylight-saving change** (user in Europe/London, week Mon 19 Oct 2026: the clocks go back on Sun 25 Oct, so the week is 169 hours; a task due Sun 25 Oct 23:30 London time is inside it, one due Mon 26 Oct 00:30 is not); a user in a time zone west of UTC (America/New_York) whose Monday starts on Monday at 04:00 or 05:00 UTC; a user who changed time zone (the weeks are recomputed in the new zone, accepted); the trend (M-a) plain at exactly 5 and 5, with the caution line at 5 and 4 and at 1 and 1, "nothing to compare" at 5 and 0, and no trend for a metric whose value is missing in one week (nothing due last week, so no completion-rate trend, even with 5 finished tasks); estimate accuracy at exactly 3 tasks and at 2; the history query returning 9 weeks with a "nothing due" week among them; and the day view for an ended day.
 
 ### 4b. The Growth Tracker page (about 8 to 12 h)
 
@@ -122,16 +123,40 @@ Day view for Wed 4 Nov at 15:00: due today **1** (T15), done **0**, still open *
 - `later-slices.test.ts`: turn the Growth Tracker placeholders into real tests where they now apply (permissions.md §9: "the Growth Tracker half waits for Slice 5"); keep the left-class and assignment-reason cases as `todo` for Slice 7.
 - Extend `tests/e2e/personal-tasks.spec.ts` by a few lines (do not add a fourth flow): after completing the task, open **Growth**, see "1 of 1" for today's due tasks, and check that the Admin gets "not found" or no menu item for `/tracker`.
 
+### 4e. Slice 4 follow-up: rotating waiting messages on "Break this down" (about 1 to 2 h)
+
+Asked by the owner on 4 Nov 2026. Independent of 4a to 4d, so it can be done first. Today, while the AI works, `src/app/(app)/tasks/ai-breakdown.tsx` (line 116) shows one fixed line: "Breaking it down... usually under 10 seconds. If the AI is busy this can take longer." The owner wants it to change every few seconds, the way other AI apps show progress, so the wait feels alive.
+
+- While the request runs (`phase.kind === "asking"`), the line under the spinner moves through these messages, one every `AI_WAIT_MESSAGE_INTERVAL_MS` = **3,000 ms** (add it to `src/config/limits.ts` next to the other AI values):
+  1. "Reading your task..."
+  2. "Thinking about the steps..."
+  3. "Writing the steps..."
+  4. "Checking the steps..."
+  5. "Adding dates to each step..."
+  6. "Still working. The AI may be busy with another request." This is the last one: it **stays** and does not loop back to the first, so a long wait never looks like the same loop going round.
+- **Keep the messages true in general.** The screen cannot know the real stage, because a server action cannot report progress (choice (3) of 4d in `decisions.md` §20). Each message is something the system really does at some point: the model reads the task and writes steps, the server checks the answer, and the **code** adds the dates. Do not add claims that never happen, such as "Searching the web" or "Analysing your past tasks". Say this in the code comment above the list, because the owner may be asked in the viva.
+- The timer runs on the client only: start it when "asking" begins, clear it when the answer, an error or a discard arrives, and on unmount (no timer left running, no state update after unmount). Each new request starts again from message 1.
+- Keep the spinner. Under `prefers-reduced-motion`, no fade or slide between messages: the text simply changes.
+- **Screen readers:** a message that changes every 3 seconds would be read out every time. Keep one fixed, screen-reader-only sentence in the status region ("Breaking it down. This usually takes under 10 seconds.") and mark the rotating text `aria-hidden="true"`.
+- The project has **no component-test setup** (no jsdom or Testing Library), and none is added for this. Instead, put the list and a pure function `aiWaitMessage(elapsedMs)` in `src/lib/ai-wait-messages.ts` (browser-safe, plain text, no HTML). The component only counts the elapsed time and shows what the function returns.
+- Tests: `tests/unit/ai-wait-messages.test.ts`: message 1 at 0 ms and at 2,999 ms, message 2 at 3,000 ms, message 5 at 12,000 ms, the last message at 15,000 ms and still at 60,000 ms. Clearing the timer is checked by hand in the browser. The fake model (`AI_FAKE_MODEL`) answers at once, so the e2e flow will not see the messages: check them with the real model in `npm run dev`. `tests/e2e/ai-breakdown.spec.ts` does not look for the old sentence, so it should not need a change.
+- Record the change and the "true in general" rule in `decisions.md` §20 (Slice 4 notes).
+
 ## 5. Out of scope
 
 The month view and consistency, the AI part of the weekly summary, storing summaries, and the estimate hint (Slice 9); the student, faculty and admin dashboards (Slice 8); the class tracker (Slice 8); the left-class rule's data (Slices 6 and 7); caching or a metrics table (only if measured slow); any export. If something here seems to need one of these, stop and ask.
 
+**Later, owner's ideas recorded on 4 Nov 2026** (write both into `decisions.md` "Still open"; build neither now):
+- **More polished graphs** once the website is fully up, possibly with a chart library. shadcn/ui's charts (built on Recharts) were suggested because they use the theme tokens. A new library needs the owner's approval when the time comes.
+- **Admins get their own personal tasks and a personal tracker**, for themselves only. It is **not called "Growth"**, which is the students' name for theirs; the name is to be chosen then, for example "My tracker". This needs a change to `permissions.md`: Admin becomes eligible for the personal-task and personal-tracker keys (today Admin is not eligible). Admin still never sees anyone else's tier 1 data, so security rule 4 holds. The owner also mentioned tasks **for other Admins**: that is a shared task between people, not a personal task, and needs its own design (who can see it, who can change it), not an extension of personal tasks.
+
 ## 6. How to work through it
 
-1. **Owner confirms M-a to M-j** (section 3), or says which to change. Record them in `decisions.md` before writing code.
-2. **4a**, then show the owner the fixture test passing, the expected-value table above, and one real week of the owner's own test account in plain numbers. The definitions are the heart of the slice; the screens only display them.
-3. 4b, 4c, 4d. After each part: run `typecheck`, `lint` and `test`; list the changed files; say what to look at in the browser (an empty week, a full week, a seed user). The owner commits each part.
-4. At the end: the full checks (`test`, `test:e2e` twice a minute apart, `npm audit`) and the docs below. No security review is due (`CLAUDE.md`: after Slices 1, 2 and 7); ask Opus for a final review of the slice.
+1. The owner has confirmed M-a to M-j (section 3, 4 Nov 2026). Record them in `decisions.md` before writing code.
+2. **4e** (small, independent) can go first, or at any point. The owner commits it on its own.
+3. **4a**, then show the owner the fixture test passing, the expected-value table above, and one real week of the owner's own test account in plain numbers. The definitions are the heart of the slice; the screens only display them.
+4. 4b, 4c, 4d. After each part: run `typecheck`, `lint` and `test`; list the changed files; say what to look at in the browser (an empty week, a full week, a seed user). The owner commits each part.
+5. At the end: the full checks (`test`, `test:e2e` twice a minute apart, `npm audit`) and the docs below. No security review is due (`CLAUDE.md`: after Slices 1, 2 and 7); ask Opus for a final review of the slice.
 
 ## 7. Security and privacy checks for this slice
 
@@ -143,8 +168,8 @@ The month view and consistency, the AI part of the weekly summary, storing summa
 
 ## 8. Documents to update in this slice
 
-- `decisions.md`: a new **§21 Slice 5 notes** before "Still open" (which becomes §22): the confirmed rules M-a to M-j, the PGlite daylight-saving check, the one-query design, the seed personas, and how to run `seed:demo` before a demo.
-- `data-flows.md` §7: the sentence from M-c in §7.2; M-a in the Trend row; M-d's wording and minimum; M-e for the day view; remove the **[Verify]** in §7.5 once checked.
+- `decisions.md`: a new **§21 Slice 5 notes** before "Still open" (which becomes §22): the confirmed rules M-a to M-j (with the owner's change to M-a and the notes on M-b, M-c, M-h and M-j), the PGlite daylight-saving check, the one-query design, the seed personas, and how to run `seed:demo` before a demo. In "Still open": the two later ideas from section 5 (polished graphs, the Admin's own tasks and tracker). In §20 (Slice 4 notes): the waiting messages of 4e.
+- `data-flows.md` §7: the sentence from M-c in §7.2; M-a in the Trend row (shown with a caution line below the minimum, not hidden); M-d's wording and minimum; M-e for the day view; remove the **[Verify]** in §7.5 once checked.
 - `data-model.md`: confirm "no new table or column" for Slice 5 (one line), and that seed users are created only by `seed:demo`.
 - `folder-structure.md`: `server/metrics/` as built, `/tracker`, `scripts/seed-demo.ts`, `SEED_DEMO_PASSWORD`.
 - `permissions.md` §9: the Growth Tracker cases now covered.
